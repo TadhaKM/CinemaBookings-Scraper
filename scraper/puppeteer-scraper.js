@@ -110,45 +110,29 @@ async function scrapeMovies(cinemaId) {
   try {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // Try multiple URL patterns
-    const urls = [
-      `https://www.odeoncinemas.ie/cinemas/${cinemaId}/`,
-      `https://www.odeoncinemas.ie/cinemas/${cinemaId}/whats-on/`,
-      `https://www.odeoncinemas.ie/${cinemaId}/`
+    // Collect movies from multiple pages (now showing + coming soon)
+    const pagesToCheck = [
+      { url: `https://www.odeoncinemas.ie/cinemas/${cinemaId}/`, name: 'Main page' },
+      { url: `https://www.odeoncinemas.ie/cinemas/${cinemaId}/whats-on/`, name: 'Whats On' },
+      { url: `https://www.odeoncinemas.ie/cinemas/${cinemaId}/coming-soon/`, name: 'Coming Soon' }
     ];
 
-    let movies = [];
+    const allMovies = new Map(); // Use map to deduplicate by URL
 
-    for (const url of urls) {
+    for (const pageInfo of pagesToCheck) {
       try {
-        console.log(`   Loading: ${url}`);
-        await page.goto(url, {
+        console.log(`   Loading ${pageInfo.name}: ${pageInfo.url}`);
+        await page.goto(pageInfo.url, {
           waitUntil: 'networkidle2',
           timeout: 30000
         });
 
         // Wait a bit for dynamic content
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        console.log('   Extracting movie data from page...');
-
-        // DEBUG: Take screenshot
-        try {
-          await page.screenshot({ path: `debug-${cinemaId}.png` });
-          console.log(`   📸 Screenshot saved: debug-${cinemaId}.png`);
-        } catch (e) {
-          console.log('   ⚠ Could not save screenshot');
-        }
-
-        // DEBUG: Get page title to confirm page loaded
-        const pageTitle = await page.title();
-        console.log(`   📄 Page title: ${pageTitle}`);
+        await new Promise(resolve => setTimeout(resolve, 1500));
 
         // Extract movie data from the page
-        movies = await page.evaluate(() => {
+        const pageMovies = await page.evaluate(() => {
           const results = [];
-
-          // Find all movie links
           const movieLinks = document.querySelectorAll('a[href*="/films/"]');
 
           movieLinks.forEach((link, index) => {
@@ -165,10 +149,12 @@ async function scrapeMovies(cinemaId) {
                 return;
               }
 
+              const fullUrl = href.startsWith('http') ? href : `https://www.odeoncinemas.ie${href}`;
+
               results.push({
                 id: id,
                 name: name,
-                url: href.startsWith('http') ? href : `https://www.odeoncinemas.ie${href}`,
+                url: fullUrl,
                 available: true,
                 showtimes: [],
                 releaseDate: null
@@ -176,23 +162,31 @@ async function scrapeMovies(cinemaId) {
             }
           });
 
-          // Remove duplicates based on name
-          const unique = [...new Map(results.map(m => [m.name.toLowerCase(), m])).values()];
-
-          return { results: unique, debugInfo: { 'a[href*="/films/"]': movieLinks.length } };
+          return results;
         });
 
-        // Log debug info
-        console.log('   🔍 Found movie links:', movies.debugInfo);
-        const movieList = movies.results;
+        console.log(`   🔍 Found ${pageMovies.length} movie links on ${pageInfo.name}`);
 
-        if (movieList.length === 0) {
-          console.log('⚠ No movie links found');
-          await page.close();
-          return [];
-        }
+        // Add to combined list (deduplicates by URL)
+        pageMovies.forEach(movie => {
+          allMovies.set(movie.url, movie);
+        });
 
-        console.log(`✓ Found ${movieList.length} movies, fetching showtimes...`);
+      } catch (error) {
+        console.log(`   ⚠ Failed to load ${pageInfo.name}:`, error.message);
+        continue;
+      }
+    }
+
+    const movieList = Array.from(allMovies.values());
+
+    if (movieList.length === 0) {
+      console.log('⚠ No movie links found on any page');
+      await page.close();
+      return [];
+    }
+
+    console.log(`✓ Found ${movieList.length} total unique movies across all pages, fetching showtimes...`);
 
         // Now visit each movie page to get showtimes
         const moviesWithShowtimes = [];
@@ -284,18 +278,8 @@ async function scrapeMovies(cinemaId) {
           console.log(`   - ${m.name} (${m.showtimeCount} showtimes${timesPreview ? ': ' + timesPreview + '...' : ''})`);
         });
 
-        await page.close();
-        return moviesWithShowtimes;
-
-      } catch (urlError) {
-        console.log(`   Failed ${url}:`, urlError.message);
-        continue;
-      }
-    }
-
-    console.log('⚠ No movies found at any URL');
     await page.close();
-    return [];
+    return moviesWithShowtimes;
 
   } catch (error) {
     console.error('⚠ Puppeteer movie scraping failed:', error.message);

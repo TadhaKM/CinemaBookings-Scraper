@@ -79,7 +79,7 @@ app.get('/api/tracked', (req, res) => {
 });
 
 // Add a movie to track
-app.post('/api/track', (req, res) => {
+app.post('/api/track', async (req, res) => {
   try {
     const { movieName, cinemaId, cinemaName } = req.body;
 
@@ -88,6 +88,17 @@ app.post('/api/track', (req, res) => {
     }
 
     const tracked = movieTracker.addMovie(movieName, cinemaId, cinemaName);
+
+    // Immediately check if the movie is available (don't wait 30 minutes)
+    console.log(`🔍 Immediately checking availability for: ${movieName} at ${cinemaName}`);
+    try {
+      await movieTracker.checkTrackedMovies();
+      console.log('✓ Initial check completed');
+    } catch (checkError) {
+      console.error('⚠ Initial check failed:', checkError.message);
+      // Don't fail the request if check fails, movie is still tracked
+    }
+
     res.json({ success: true, tracked });
   } catch (error) {
     console.error('Error tracking movie:', error);
