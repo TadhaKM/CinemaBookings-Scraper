@@ -132,6 +132,18 @@ async function scrapeMovies(cinemaId) {
 
         console.log('   Extracting movie data from page...');
 
+        // DEBUG: Take screenshot
+        try {
+          await page.screenshot({ path: `debug-${cinemaId}.png` });
+          console.log(`   📸 Screenshot saved: debug-${cinemaId}.png`);
+        } catch (e) {
+          console.log('   ⚠ Could not save screenshot');
+        }
+
+        // DEBUG: Get page title to confirm page loaded
+        const pageTitle = await page.title();
+        console.log(`   📄 Page title: ${pageTitle}`);
+
         // Extract movie data from the page
         movies = await page.evaluate(() => {
           const results = [];
@@ -144,11 +156,19 @@ async function scrapeMovies(cinemaId) {
             '.film-card',
             '.movie-card',
             'a[href*="/films/"]',
-            '[data-movie-id]'
+            '[data-movie-id]',
+            // Add more generic selectors
+            'article',
+            '.card',
+            '[class*="film"]',
+            '[class*="movie"]'
           ];
+
+          const debugInfo = {};
 
           for (const selector of selectors) {
             const elements = document.querySelectorAll(selector);
+            debugInfo[selector] = elements.length;
 
             elements.forEach((el, index) => {
               const id = el.getAttribute('data-film-id') ||
@@ -159,7 +179,8 @@ async function scrapeMovies(cinemaId) {
 
               const name = el.querySelector('h2, h3, h4, .film-title, .film-name, .movie-title, .title')?.textContent?.trim() ||
                           el.getAttribute('title') ||
-                          el.getAttribute('aria-label');
+                          el.getAttribute('aria-label') ||
+                          el.textContent?.trim().split('\n')[0]; // Try first line of text
 
               if (name && name.length > 0 && name.length < 200) {
                 // Count showtime buttons or links
@@ -178,8 +199,12 @@ async function scrapeMovies(cinemaId) {
             if (results.length > 0) break;
           }
 
-          return results;
+          return { results, debugInfo };
         });
+
+        // Log debug info
+        console.log('   🔍 Selector match counts:', movies.debugInfo);
+        movies = movies.results;
 
         if (movies.length > 0) {
           console.log(`✓ Found ${movies.length} movies`);
