@@ -2,15 +2,32 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const Fuse = require('fuse.js');
 const { getMockCinemas, getMockMovies } = require('./mock-data');
+const puppeteerScraper = require('./puppeteer-scraper');
 
 // Odeon Ireland API and website URLs
 const ODEON_WEBSITE = 'https://www.odeoncinemas.ie';
+
+// Configuration: Use Puppeteer for real scraping or mock data
+const USE_PUPPETEER = process.env.USE_PUPPETEER === 'true';
 
 /**
  * Fetch all Odeon cinemas in Dublin
  */
 async function getCinemas() {
   console.log('🎬 Fetching Odeon Dublin cinemas...');
+
+  // Try Puppeteer first if enabled
+  if (USE_PUPPETEER) {
+    console.log('Using Puppeteer for real scraping...');
+    try {
+      const cinemas = await puppeteerScraper.scrapeCinemas();
+      if (cinemas && cinemas.length > 0) {
+        return cinemas;
+      }
+    } catch (error) {
+      console.log('⚠ Puppeteer scraping failed, trying fallback methods...');
+    }
+  }
 
   try {
     // Try to fetch cinema data from various endpoints
@@ -115,6 +132,19 @@ async function getCinemas() {
  */
 async function getMovies(cinemaId) {
   console.log(`🎬 Fetching movies for cinema: ${cinemaId}`);
+
+  // Try Puppeteer first if enabled
+  if (USE_PUPPETEER) {
+    console.log('Using Puppeteer for real scraping...');
+    try {
+      const movies = await puppeteerScraper.scrapeMovies(cinemaId);
+      if (movies && movies.length > 0) {
+        return movies;
+      }
+    } catch (error) {
+      console.log('⚠ Puppeteer scraping failed, trying fallback methods...');
+    }
+  }
 
   try {
     // Try multiple URL patterns for Odeon
