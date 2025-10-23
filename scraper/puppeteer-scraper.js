@@ -148,74 +148,144 @@ async function scrapeMovies(cinemaId) {
         movies = await page.evaluate(() => {
           const results = [];
 
-          // Try multiple selectors for movie items
-          const selectors = [
-            'article[data-film-id]',
-            '[data-film]',
-            '.film-item',
-            '.film-card',
-            '.movie-card',
-            'a[href*="/films/"]',
-            '[data-movie-id]',
-            // Add more generic selectors
-            'article',
-            '.card',
-            '[class*="film"]',
-            '[class*="movie"]'
-          ];
+          // Find all movie links
+          const movieLinks = document.querySelectorAll('a[href*="/films/"]');
 
-          const debugInfo = {};
+          movieLinks.forEach((link, index) => {
+            const href = link.getAttribute('href');
+            const name = link.textContent?.trim() ||
+                        link.getAttribute('title') ||
+                        link.getAttribute('aria-label');
 
-          for (const selector of selectors) {
-            const elements = document.querySelectorAll(selector);
-            debugInfo[selector] = elements.length;
+            if (name && name.length > 0 && name.length < 200 && href) {
+              const id = href.split('/').filter(Boolean).pop() || `film-${index}`;
 
-            elements.forEach((el, index) => {
-              const id = el.getAttribute('data-film-id') ||
-                        el.getAttribute('data-film') ||
-                        el.getAttribute('data-movie-id') ||
-                        el.getAttribute('href')?.split('/').pop() ||
-                        `film-${index}`;
-
-              const name = el.querySelector('h2, h3, h4, .film-title, .film-name, .movie-title, .title')?.textContent?.trim() ||
-                          el.getAttribute('title') ||
-                          el.getAttribute('aria-label') ||
-                          el.textContent?.trim().split('\n')[0]; // Try first line of text
-
-              if (name && name.length > 0 && name.length < 200) {
-                // Count showtime buttons or links
-                const showtimes = el.querySelectorAll('[data-session-id], .showtime, .session, button[data-performance], a[href*="booking"]').length;
-
-                results.push({
-                  id: id,
-                  name: name,
-                  available: true,
-                  showtimes: showtimes || 0,
-                  releaseDate: null
-                });
+              // Skip generic "Films" links
+              if (name.toLowerCase() === 'films' || name.toLowerCase() === 'movies') {
+                return;
               }
-            });
 
-            if (results.length > 0) break;
-          }
+              results.push({
+                id: id,
+                name: name,
+                url: href.startsWith('http') ? href : `https://www.odeoncinemas.ie${href}`,
+                available: true,
+                showtimes: [],
+                releaseDate: null
+              });
+            }
+          });
 
-          return { results, debugInfo };
+          // Remove duplicates based on name
+          const unique = [...new Map(results.map(m => [m.name.toLowerCase(), m])).values()];
+
+          return { results: unique, debugInfo: { 'a[href*="/films/"]': movieLinks.length } };
         });
 
         // Log debug info
-        console.log('   🔍 Selector match counts:', movies.debugInfo);
-        movies = movies.results;
+        console.log('   🔍 Found movie links:', movies.debugInfo);
+        const movieList = movies.results;
 
-        if (movies.length > 0) {
-          console.log(`✓ Found ${movies.length} movies`);
-
-          // Remove duplicates based on name
-          const uniqueMovies = [...new Map(movies.map(m => [m.name.toLowerCase(), m])).values()];
-          uniqueMovies.forEach(m => console.log(`   - ${m.name} (${m.showtimes} showtimes)`));
-
+        if (movieList.length === 0) {
+          console.log('⚠ No movie links found');
           await page.close();
-          return uniqueMovies;
+          return [];
         }
+
+        console.log(`✓ Found ${movieList.length} movies, fetching showtimes...`);
+
+        // Now visit each movie page to get showtimes
+        const moviesWithShowtimes = [];
+
+        for (const movie of movieList.slice(0, 10)) { // Limit to first 10 to avoid taking too long
+          try {
+            console.log(`   📅 Fetching showtimes for: ${movie.name}`);
+
+            await page.goto(movie.url, {
+              waitUntil: 'networkidle2',
+              timeout: 15000
+            });
+
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Extract showtime information
+            const showtimes = await page.evaluate(() => {
+              const times = [];
+
+              // Try various selectors for showtime buttons/links
+              const selectors = [
+                'button[data-session-time]',
+                '[data-performance-time]',
+                '.showtime',
+                '.session-time',
+                'a[href*="booking"]',
+                'button[class*="time"]',
+                '[class*="showtime"]',
+                'time'
+              ];
+
+              for (const selector of selectors) {
+                const elements = document.querySelectorAll(selector);
+
+                elements.forEach(el => {
+                  const timeText = el.textContent?.trim() ||
+                                  el.getAttribute('data-session-time') ||
+                                  el.getAttribute('data-performance-time') ||
+                                  el.getAttribute('datetime');
+
+                  const dateText = el.getAttribute('data-date') ||
+                                  el.closest('[data-date]')?.getAttribute('data-date') ||
+                                  el.closest('[class*="date"]')?.textContent?.trim();
+
+                  if (timeText && timeText.match(/\d{1,2}:\d{2}/)) {
+                    times.push({
+                      time: timeText.trim(),
+                      date: dateText || 'Today',
+                      format: el.getAttribute('data-format') ||
+                             el.textContent?.includes('IMAX') ? 'IMAX' : 'Standard'
+                    });
+                  }
+                });
+
+                if (times.length > 0) break;
+              }
+
+              return times;
+            });
+
+            moviesWithShowtimes.push({
+              id: movie.id,
+              name: movie.name,
+              available: showtimes.length > 0,
+              showtimes: showtimes,
+              showtimeCount: showtimes.length,
+              releaseDate: null
+            });
+
+            console.log(`      ✓ ${showtimes.length} showtimes found`);
+
+          } catch (error) {
+            console.log(`      ⚠ Failed to fetch showtimes: ${error.message}`);
+            // Add movie anyway with 0 showtimes
+            moviesWithShowtimes.push({
+              id: movie.id,
+              name: movie.name,
+              available: true,
+              showtimes: [],
+              showtimeCount: 0,
+              releaseDate: null
+            });
+          }
+        }
+
+        console.log(`✓ Processed ${moviesWithShowtimes.length} movies with showtime data`);
+        moviesWithShowtimes.forEach(m => {
+          const timesPreview = m.showtimes.slice(0, 3).map(s => s.time).join(', ');
+          console.log(`   - ${m.name} (${m.showtimeCount} showtimes${timesPreview ? ': ' + timesPreview + '...' : ''})`);
+        });
+
+        await page.close();
+        return moviesWithShowtimes;
 
       } catch (urlError) {
         console.log(`   Failed ${url}:`, urlError.message);

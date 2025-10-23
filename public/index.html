@@ -51,9 +51,28 @@
                     <div v-if="searchResults.found">
                         <div v-for="movie in searchResults.movies" :key="movie.id" class="search-result-item">
                             <strong>{{ movie.name }}</strong><br>
-                            {{ movie.showtimes }} showtime(s) available
+                            <span v-if="movie.showtimeCount !== undefined">
+                                {{ movie.showtimeCount }} showtime(s) available
+                            </span>
+                            <span v-else>
+                                {{ movie.showtimes }} showtime(s) available
+                            </span>
                             <span v-if="movie.releaseDate"><br>Release date: {{ formatDate(movie.releaseDate) }}</span>
                             <span v-if="movie.matchScore"><br><em>Match score: {{ (movie.matchScore * 100).toFixed(0) }}%</em></span>
+
+                            <!-- Show showtimes if available -->
+                            <div v-if="movie.showtimes && Array.isArray(movie.showtimes) && movie.showtimes.length > 0" class="showtimes-list">
+                                <strong>Available times:</strong>
+                                <div class="showtime-group">
+                                    <span v-for="(showtime, idx) in movie.showtimes.slice(0, 8)" :key="idx" class="showtime-badge">
+                                        {{ showtime.date }} @ {{ showtime.time }}
+                                        <span v-if="showtime.format && showtime.format !== 'Standard'" class="format-tag">{{ showtime.format }}</span>
+                                    </span>
+                                    <span v-if="movie.showtimes.length > 8" class="more-times">
+                                        +{{ movie.showtimes.length - 8 }} more
+                                    </span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <p v-else-if="searchResults.loading">Searching...</p>
