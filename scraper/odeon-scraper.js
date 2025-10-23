@@ -1,6 +1,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const Fuse = require('fuse.js');
+const { getMockCinemas, getMockMovies } = require('./mock-data');
 
 // Odeon Ireland API and website URLs
 const ODEON_WEBSITE = 'https://www.odeoncinemas.ie';
@@ -105,14 +106,8 @@ async function getCinemas() {
     console.log('⚠ All API/scraping attempts failed, using default cinemas');
   }
 
-  // Return default Odeon Dublin cinemas as fallback
-  console.log('Using default Dublin cinema list');
-  return [
-    { id: 'point-square', name: 'Odeon Point Square', address: 'Point Village, Dublin 1' },
-    { id: 'blanchardstown', name: 'Odeon Blanchardstown', address: 'Blanchardstown Centre, Dublin 15' },
-    { id: 'coolock', name: 'Odeon Coolock', address: 'Northside Shopping Centre, Dublin 5' },
-    { id: 'stillorgan', name: 'Odeon Stillorgan', address: 'Stillorgan, Co. Dublin' }
-  ];
+  // Return mock cinemas as fallback
+  return getMockCinemas();
 }
 
 /**
@@ -240,8 +235,8 @@ async function getMovies(cinemaId) {
     console.error('⚠ All movie fetch attempts failed:', error.message);
   }
 
-  console.log('⚠ No movies found');
-  return [];
+  // Return mock movies as fallback
+  return getMockMovies(cinemaId);
 }
 
 /**
