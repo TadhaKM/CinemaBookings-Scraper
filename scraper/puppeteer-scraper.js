@@ -127,25 +127,48 @@ async function scrapeMovies(cinemaId) {
           timeout: 30000
         });
 
-        // Wait a bit for dynamic content
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Wait longer for dynamic content and JavaScript
+        await new Promise(resolve => setTimeout(resolve, 3000));
 
-        // Extract movie data from the page
+        // DEBUG: Screenshot
+        try {
+          await page.screenshot({ path: `debug-${pageInfo.name.replace(/\s+/g, '-')}.png` });
+          console.log(`   📸 Screenshot: debug-${pageInfo.name.replace(/\s+/g, '-')}.png`);
+        } catch (e) {}
+
+        // Extract movie data from the page using MULTIPLE strategies
         const pageMovies = await page.evaluate(() => {
           const results = [];
-          const movieLinks = document.querySelectorAll('a[href*="/films/"]');
 
-          movieLinks.forEach((link, index) => {
+          // Strategy 1: Links with /films/ in href
+          const filmLinks = document.querySelectorAll('a[href*="/films/"]');
+
+          // Strategy 2: ANY link with movie-like class names
+          const movieElements = document.querySelectorAll('[class*="film"], [class*="movie"], [data-film], article');
+
+          // Combine all potential movie elements
+          const allElements = new Set([...filmLinks, ...movieElements]);
+
+          allElements.forEach((elem) => {
+            // Try to find a link within or use the element itself
+            const link = elem.tagName === 'A' ? elem : elem.querySelector('a[href*="/films/"]');
+
+            if (!link) return;
+
             const href = link.getAttribute('href');
-            const name = link.textContent?.trim() ||
-                        link.getAttribute('title') ||
-                        link.getAttribute('aria-label');
+            if (!href || !href.includes('/films/')) return;
 
-            if (name && name.length > 0 && name.length < 200 && href) {
-              const id = href.split('/').filter(Boolean).pop() || `film-${index}`;
+            // Try multiple ways to get the movie name
+            const name = link.getAttribute('title') ||
+                        link.getAttribute('aria-label') ||
+                        elem.querySelector('h1, h2, h3, h4, .title, [class*="title"]')?.textContent?.trim() ||
+                        link.textContent?.trim();
 
-              // Skip generic "Films" links
-              if (name.toLowerCase() === 'films' || name.toLowerCase() === 'movies') {
+            if (name && name.length > 2 && name.length < 200) {
+              const id = href.split('/').filter(Boolean).pop() || `film-${results.length}`;
+
+              // Skip generic links
+              if (name.toLowerCase() === 'films' || name.toLowerCase() === 'movies' || name.toLowerCase() === 'view all') {
                 return;
               }
 
@@ -162,10 +185,17 @@ async function scrapeMovies(cinemaId) {
             }
           });
 
-          return results;
+          // Deduplicate by URL within this page
+          const seen = new Map();
+          results.forEach(m => seen.set(m.url, m));
+
+          return Array.from(seen.values());
         });
 
         console.log(`   🔍 Found ${pageMovies.length} movie links on ${pageInfo.name}`);
+        if (pageMovies.length > 0) {
+          console.log(`      Movies: ${pageMovies.slice(0, 5).map(m => m.name).join(', ')}${pageMovies.length > 5 ? '...' : ''}`);
+        }
 
         // Add to combined list (deduplicates by URL)
         pageMovies.forEach(movie => {
@@ -191,7 +221,7 @@ async function scrapeMovies(cinemaId) {
         // Now visit each movie page to get showtimes
         const moviesWithShowtimes = [];
 
-        for (const movie of movieList.slice(0, 10)) { // Limit to first 10 to avoid taking too long
+        for (const movie of movieList.slice(0, 15)) { // Increased to 15 to catch more movies
           try {
             console.log(`   📅 Fetching showtimes for: ${movie.name}`);
 
@@ -200,51 +230,83 @@ async function scrapeMovies(cinemaId) {
               timeout: 15000
             });
 
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // Wait longer for JavaScript to load showtimes
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
-            // Extract showtime information
+            // Extract showtime information with AGGRESSIVE extraction
             const showtimes = await page.evaluate(() => {
               const times = [];
 
-              // Try various selectors for showtime buttons/links
-              const selectors = [
-                'button[data-session-time]',
-                '[data-performance-time]',
-                '.showtime',
-                '.session-time',
-                'a[href*="booking"]',
-                'button[class*="time"]',
-                '[class*="showtime"]',
-                'time'
-              ];
+              // Strategy 1: Find ALL buttons that might be showtimes
+              const buttons = document.querySelectorAll('button, a, [role="button"]');
 
-              for (const selector of selectors) {
-                const elements = document.querySelectorAll(selector);
+              buttons.forEach(btn => {
+                const text = btn.textContent?.trim() || '';
+                const href = btn.getAttribute('href') || '';
 
-                elements.forEach(el => {
-                  const timeText = el.textContent?.trim() ||
-                                  el.getAttribute('data-session-time') ||
-                                  el.getAttribute('data-performance-time') ||
-                                  el.getAttribute('datetime');
+                // Look for time patterns (14:30, 19:00, etc.)
+                const timeMatch = text.match(/(\d{1,2}):(\d{2})/);
 
-                  const dateText = el.getAttribute('data-date') ||
-                                  el.closest('[data-date]')?.getAttribute('data-date') ||
-                                  el.closest('[class*="date"]')?.textContent?.trim();
+                if (timeMatch) {
+                  // Try to find date context
+                  let dateText = 'Today';
 
-                  if (timeText && timeText.match(/\d{1,2}:\d{2}/)) {
+                  // Look for date in parent elements
+                  let parent = btn.closest('[class*="date"], [data-date]');
+                  if (parent) {
+                    dateText = parent.getAttribute('data-date') ||
+                              parent.querySelector('[class*="date"]')?.textContent?.trim() ||
+                              'Today';
+                  }
+
+                  // Check if it's IMAX or other format
+                  let format = 'Standard';
+                  if (text.toUpperCase().includes('IMAX')) {
+                    format = 'IMAX';
+                  } else if (text.includes('3D')) {
+                    format = '3D';
+                  }
+
+                  times.push({
+                    time: timeMatch[0],
+                    date: dateText,
+                    format: format
+                  });
+                }
+              });
+
+              // Strategy 2: Look for ANY element with time-like text
+              if (times.length === 0) {
+                const allElements = document.querySelectorAll('*');
+
+                allElements.forEach(el => {
+                  const text = el.textContent?.trim() || '';
+
+                  // Only look at small elements (not huge containers)
+                  if (text.length > 100) return;
+
+                  const timeMatch = text.match(/\b(\d{1,2}):(\d{2})\b/);
+
+                  if (timeMatch && el.children.length === 0) { // Leaf node only
                     times.push({
-                      time: timeText.trim(),
-                      date: dateText || 'Today',
-                      format: el.getAttribute('data-format') ||
-                             el.textContent?.includes('IMAX') ? 'IMAX' : 'Standard'
+                      time: timeMatch[0],
+                      date: 'Today',
+                      format: text.includes('IMAX') ? 'IMAX' : 'Standard'
                     });
                   }
                 });
-
-                if (times.length > 0) break;
               }
 
-              return times;
+              // Deduplicate times
+              const seen = new Set();
+              const unique = times.filter(t => {
+                const key = `${t.date}-${t.time}-${t.format}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+              });
+
+              return unique;
             });
 
             moviesWithShowtimes.push({
