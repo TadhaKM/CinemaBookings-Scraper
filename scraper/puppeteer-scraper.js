@@ -128,7 +128,7 @@ async function scrapeMovies(cinemaId) {
         });
 
         // Wait a bit for dynamic content
-        await page.waitForTimeout(2000);
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         console.log('   Extracting movie data from page...');
 
