@@ -48,6 +48,25 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
+// Debug endpoint - get all movies at a cinema with full details
+app.get('/api/debug/cinema/:cinemaId', async (req, res) => {
+  try {
+    const { cinemaId } = req.params;
+    console.log(`\n========== DEBUG: Fetching movies for ${cinemaId} ==========`);
+    const movies = await odeonScraper.getMovies(cinemaId);
+    console.log(`========== DEBUG: Found ${movies.length} movies ==========\n`);
+    res.json({
+      cinemaId,
+      movieCount: movies.length,
+      movies: movies,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.status(500).json({ error: error.message, stack: error.stack });
+  }
+});
+
 // Get all tracked movies
 app.get('/api/tracked', (req, res) => {
   try {

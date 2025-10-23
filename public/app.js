@@ -15,7 +15,9 @@ createApp({
         visible: false,
         loading: false,
         found: false,
-        movies: []
+        movies: [],
+        error: null,
+        availableMovies: []
       },
       toast: {
         visible: false,
@@ -117,6 +119,8 @@ createApp({
       this.searchResults.loading = true;
       this.searchResults.found = false;
       this.searchResults.movies = [];
+      this.searchResults.error = null;
+      this.searchResults.availableMovies = [];
 
       try {
         const response = await fetch(
@@ -127,9 +131,14 @@ createApp({
         this.searchResults.loading = false;
         this.searchResults.found = data.found && data.movies.length > 0;
         this.searchResults.movies = data.movies || [];
+        this.searchResults.error = data.error || null;
+        this.searchResults.availableMovies = data.availableMovies || [];
+
+        console.log('Search results:', data);
       } catch (error) {
         console.error('Error searching:', error);
         this.searchResults.loading = false;
+        this.searchResults.error = 'Network error occurred';
         this.showToast('Search failed', 'error');
       }
     },

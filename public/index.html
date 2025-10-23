@@ -53,10 +53,20 @@
                             <strong>{{ movie.name }}</strong><br>
                             {{ movie.showtimes }} showtime(s) available
                             <span v-if="movie.releaseDate"><br>Release date: {{ formatDate(movie.releaseDate) }}</span>
+                            <span v-if="movie.matchScore"><br><em>Match score: {{ (movie.matchScore * 100).toFixed(0) }}%</em></span>
                         </div>
                     </div>
                     <p v-else-if="searchResults.loading">Searching...</p>
-                    <p v-else>No results found. The movie might not be available yet.</p>
+                    <div v-else>
+                        <p><strong>No exact match found.</strong></p>
+                        <p v-if="searchResults.error">{{ searchResults.error }}</p>
+                        <div v-if="searchResults.availableMovies && searchResults.availableMovies.length > 0">
+                            <p>Available movies at this cinema:</p>
+                            <ul style="margin-top: 10px;">
+                                <li v-for="(movie, index) in searchResults.availableMovies" :key="index">{{ movie }}</li>
+                            </ul>
+                        </div>
+                    </div>
                 </div>
             </section>
 
