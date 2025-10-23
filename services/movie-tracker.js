@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const cineworldScraper = require('../scraper/cineworld-scraper');
+const odeonScraper = require('../scraper/odeon-scraper');
 
 const DATA_DIR = path.join(__dirname, '../data');
 const TRACKED_FILE = path.join(DATA_DIR, 'tracked-movies.json');
@@ -152,7 +152,7 @@ async function checkTrackedMovies() {
     try {
       console.log(`Checking: ${movie.movieName} at cinema ${movie.cinemaId}`);
 
-      const result = await cineworldScraper.searchMovie(movie.movieName, movie.cinemaId);
+      const result = await odeonScraper.searchMovie(movie.movieName, movie.cinemaId);
 
       movie.lastChecked = new Date().toISOString();
 

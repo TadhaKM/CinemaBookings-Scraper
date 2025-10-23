@@ -1,7 +1,7 @@
 const express = require('express');
 const path = require('path');
 const cron = require('node-cron');
-const cineworldScraper = require('./scraper/cineworld-scraper');
+const odeonScraper = require('./scraper/odeon-scraper');
 const movieTracker = require('./services/movie-tracker');
 
 const app = express();
@@ -16,7 +16,7 @@ app.use(express.static('public'));
 // Get all cinemas
 app.get('/api/cinemas', async (req, res) => {
   try {
-    const cinemas = await cineworldScraper.getCinemas();
+    const cinemas = await odeonScraper.getCinemas();
     res.json(cinemas);
   } catch (error) {
     console.error('Error fetching cinemas:', error);
@@ -28,7 +28,7 @@ app.get('/api/cinemas', async (req, res) => {
 app.get('/api/cinemas/:cinemaId/movies', async (req, res) => {
   try {
     const { cinemaId } = req.params;
-    const movies = await cineworldScraper.getMovies(cinemaId);
+    const movies = await odeonScraper.getMovies(cinemaId);
     res.json(movies);
   } catch (error) {
     console.error('Error fetching movies:', error);
@@ -40,7 +40,7 @@ app.get('/api/cinemas/:cinemaId/movies', async (req, res) => {
 app.get('/api/search', async (req, res) => {
   try {
     const { movie, cinema } = req.query;
-    const results = await cineworldScraper.searchMovie(movie, cinema);
+    const results = await odeonScraper.searchMovie(movie, cinema);
     res.json(results);
   } catch (error) {
     console.error('Error searching movie:', error);
@@ -134,6 +134,6 @@ app.post('/api/check', async (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Cineworld Movie Tracker running on http://localhost:${PORT}`);
+  console.log(`Odeon Dublin Movie Tracker running on http://localhost:${PORT}`);
   console.log('Scheduled checks will run every 30 minutes');
 });

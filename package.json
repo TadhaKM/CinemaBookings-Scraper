@@ -1,17 +1,19 @@
 {
-  "name": "cineworld-movie-tracker",
+  "name": "odeon-dublin-movie-tracker",
   "version": "1.0.0",
-  "description": "Web app to track and notify when movies are available at Cineworld",
+  "description": "Web app to track and notify when movies are available at Odeon Dublin cinemas",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
   "keywords": [
-    "cineworld",
+    "odeon",
+    "dublin",
     "movie",
     "tracker",
-    "scraper"
+    "scraper",
+    "vue"
   ],
   "author": "",
   "license": "MIT",

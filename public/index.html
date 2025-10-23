@@ -3,69 +3,142 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cineworld Movie Tracker</title>
+    <title>Odeon Dublin Movie Tracker</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.prod.js"></script>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🎬 Cineworld Movie Tracker</h1>
-            <p class="subtitle">Get notified when your favorite movies are available to book</p>
-        </header>
+    <div id="app">
+        <div class="container">
+            <header>
+                <h1>🎬 Odeon Dublin Movie Tracker</h1>
+                <p class="subtitle">Get notified when your favorite movies are available to book</p>
+            </header>
 
-        <div class="notifications-badge" id="notificationsBadge" style="display: none;">
-            <span id="notificationCount">0</span> new notifications
+            <div v-if="notifications.length > 0" class="notifications-badge">
+                {{ notifications.length }} new notification{{ notifications.length > 1 ? 's' : '' }}
+            </div>
+
+            <section class="card">
+                <h2>Track a New Movie</h2>
+                <form @submit.prevent="trackMovie">
+                    <div class="form-group">
+                        <label for="movieName">Movie Name</label>
+                        <input
+                            type="text"
+                            id="movieName"
+                            v-model="form.movieName"
+                            placeholder="e.g., Dune: Part Two"
+                            required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="cinemaSelect">Select Cinema</label>
+                        <select id="cinemaSelect" v-model="form.cinemaId" required>
+                            <option value="">{{ cinemas.length === 0 ? 'Loading cinemas...' : 'Select a cinema' }}</option>
+                            <option v-for="cinema in cinemas" :key="cinema.id" :value="cinema.id">
+                                {{ cinema.name }}{{ cinema.address ? ' - ' + cinema.address : '' }}
+                            </option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Start Tracking</button>
+                    <button type="button" class="btn btn-secondary" @click="searchMovie">Search Now</button>
+                </form>
+
+                <div v-if="searchResults.visible" class="search-results">
+                    <h3 v-if="searchResults.found">Found {{ searchResults.movies.length }} result(s):</h3>
+                    <div v-if="searchResults.found">
+                        <div v-for="movie in searchResults.movies" :key="movie.id" class="search-result-item">
+                            <strong>{{ movie.name }}</strong><br>
+                            {{ movie.showtimes }} showtime(s) available
+                            <span v-if="movie.releaseDate"><br>Release date: {{ formatDate(movie.releaseDate) }}</span>
+                        </div>
+                    </div>
+                    <p v-else-if="searchResults.loading">Searching...</p>
+                    <p v-else>No results found. The movie might not be available yet.</p>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="section-header">
+                    <h2>Tracked Movies</h2>
+                    <button
+                        class="btn btn-secondary btn-sm"
+                        @click="checkAllMovies"
+                        :disabled="checking">
+                        {{ checking ? 'Checking...' : 'Check All Now' }}
+                    </button>
+                </div>
+                <div class="tracked-list">
+                    <p v-if="trackedMovies.length === 0" class="empty-state">
+                        No movies tracked yet. Add one above!
+                    </p>
+                    <div v-else>
+                        <div v-for="movie in trackedMovies" :key="movie.id" class="tracked-item">
+                            <div class="tracked-item-header">
+                                <div>
+                                    <div class="movie-name">{{ movie.movieName }}</div>
+                                    <div class="cinema-name">{{ movie.cinemaName }}</div>
+                                </div>
+                                <div>
+                                    <span class="status-badge" :class="'status-' + movie.status">
+                                        {{ movie.status.toUpperCase() }}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="movie-info">
+                                Added: {{ formatDateTime(movie.addedAt) }}
+                                <span v-if="movie.lastChecked"><br>Last checked: {{ formatDateTime(movie.lastChecked) }}</span>
+                                <span v-if="movie.foundAt"><br>Found at: {{ formatDateTime(movie.foundAt) }}</span>
+                            </div>
+                            <button
+                                class="btn btn-danger btn-sm"
+                                @click="removeMovie(movie.id)"
+                                style="margin-top: 10px;">
+                                Remove
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="section-header">
+                    <h2>Notifications</h2>
+                    <button
+                        class="btn btn-secondary btn-sm"
+                        @click="clearNotifications"
+                        v-if="notifications.length > 0">
+                        Clear All
+                    </button>
+                </div>
+                <div class="notifications-list">
+                    <p v-if="notifications.length === 0" class="empty-state">No notifications yet.</p>
+                    <div v-else>
+                        <div v-for="notif in notifications" :key="notif.id" class="notification-item">
+                            <div class="notification-message">{{ notif.message }}</div>
+                            <div v-if="notif.details" class="notification-details">
+                                <span v-if="notif.details.showtimes">
+                                    {{ notif.details.showtimes }} showtime(s) available
+                                </span>
+                            </div>
+                            <div class="notification-time">{{ formatDateTime(notif.createdAt) }}</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <footer>
+                <p>The app checks for new movies every 30 minutes automatically.</p>
+                <p class="tech-note">Built with Node.js, Express, Vue.js and web scraping</p>
+            </footer>
         </div>
 
-        <section class="card">
-            <h2>Track a New Movie</h2>
-            <form id="trackForm">
-                <div class="form-group">
-                    <label for="movieName">Movie Name</label>
-                    <input type="text" id="movieName" placeholder="e.g., Dune: Part Two" required>
-                </div>
-
-                <div class="form-group">
-                    <label for="cinemaSelect">Select Cinema</label>
-                    <select id="cinemaSelect" required>
-                        <option value="">Loading cinemas...</option>
-                    </select>
-                </div>
-
-                <button type="submit" class="btn btn-primary">Start Tracking</button>
-                <button type="button" class="btn btn-secondary" id="searchBtn">Search Now</button>
-            </form>
-
-            <div id="searchResults" class="search-results" style="display: none;"></div>
-        </section>
-
-        <section class="card">
-            <div class="section-header">
-                <h2>Tracked Movies</h2>
-                <button class="btn btn-secondary btn-sm" id="checkNowBtn">Check All Now</button>
-            </div>
-            <div id="trackedMovies" class="tracked-list">
-                <p class="empty-state">No movies tracked yet. Add one above!</p>
-            </div>
-        </section>
-
-        <section class="card">
-            <div class="section-header">
-                <h2>Notifications</h2>
-                <button class="btn btn-secondary btn-sm" id="clearNotificationsBtn">Clear All</button>
-            </div>
-            <div id="notifications" class="notifications-list">
-                <p class="empty-state">No notifications yet.</p>
-            </div>
-        </section>
-
-        <footer>
-            <p>The app checks for new movies every 30 minutes automatically.</p>
-            <p class="tech-note">Built with Node.js, Express, and web scraping</p>
-        </footer>
+        <div :class="['toast', toast.type, { show: toast.visible }]">
+            {{ toast.message }}
+        </div>
     </div>
-
-    <div id="toast" class="toast"></div>
 
     <script src="app.js"></script>
 </body>

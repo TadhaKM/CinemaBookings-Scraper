@@ -1,22 +1,23 @@
-# Cineworld Movie Tracker
+# Odeon Dublin Movie Tracker
 
-A web application that scrapes Cineworld's website and notifies you when a specific movie you want to watch becomes available to book at your chosen cinema.
+A web application that scrapes Odeon Cinema Dublin's website and notifies you when a specific movie you want to watch becomes available to book at your chosen Odeon cinema in Dublin.
 
 ## Features
 
-- **Track Multiple Movies**: Add any movie you want to watch at any Cineworld cinema
+- **Track Multiple Movies**: Add any movie you want to watch at any Odeon Dublin cinema
 - **Automatic Checking**: The app checks for movie availability every 30 minutes automatically
 - **Real-time Notifications**: Get instant notifications when your tracked movies become available
 - **Manual Search**: Search for movies immediately without waiting for scheduled checks
-- **Clean Web Interface**: Easy-to-use interface to manage your tracked movies
+- **Clean Web Interface**: Modern Vue.js-powered interface to manage your tracked movies
 - **Persistent Storage**: Your tracked movies and notifications are saved locally
+- **Dublin-Focused**: Specifically targets Odeon cinemas in Dublin
 
 ## Technology Stack
 
 - **Backend**: Node.js with Express
 - **Web Scraping**: Axios and Cheerio
 - **Scheduling**: node-cron for periodic checks
-- **Frontend**: Vanilla JavaScript, HTML5, CSS3
+- **Frontend**: Vue.js 3 (via CDN), HTML5, CSS3
 - **Storage**: JSON file-based storage
 
 ## Installation
@@ -52,15 +53,16 @@ http://localhost:3000
 ### Tracking a Movie
 
 1. Enter the movie name you want to track (e.g., "Dune: Part Two")
-2. Select the Cineworld cinema location
+2. Select the Odeon Dublin cinema location from the dropdown
 3. Click "Start Tracking" to add it to your tracked list
 4. The app will automatically check every 30 minutes
 
 ### Searching Immediately
 
 If you want to check right away instead of waiting:
-1. Fill in the movie name and cinema
+1. Fill in the movie name and select a cinema
 2. Click "Search Now" to get immediate results
+3. See available showtimes if the movie is currently showing
 
 ### Managing Tracked Movies
 
@@ -75,10 +77,18 @@ If you want to check right away instead of waiting:
 - Notifications show the movie name, cinema, and number of showtimes
 - Click "Clear All" to remove all notifications
 
+## Dublin Odeon Cinemas Supported
+
+The app includes these Odeon cinemas in Dublin:
+- Odeon Point Square (Point Village, Dublin 1)
+- Odeon Blanchardstown (Blanchardstown Centre, Dublin 15)
+- Odeon Coolock (Northside Shopping Centre, Dublin 5)
+- Odeon Stillorgan (Stillorgan, Co. Dublin)
+
 ## API Endpoints
 
 ### GET /api/cinemas
-Returns a list of all Cineworld cinemas.
+Returns a list of all Odeon Dublin cinemas.
 
 ### GET /api/cinemas/:cinemaId/movies
 Returns all movies currently showing at a specific cinema.
@@ -94,8 +104,8 @@ Adds a new movie to track.
 ```json
 {
   "movieName": "Dune: Part Two",
-  "cinemaId": "3",
-  "cinemaName": "Cineworld London Leicester Square"
+  "cinemaId": "point-square",
+  "cinemaName": "Odeon Point Square"
 }
 ```
 
@@ -118,13 +128,13 @@ claude/
 ├── server.js                 # Main Express server
 ├── package.json              # Dependencies
 ├── scraper/
-│   └── cineworld-scraper.js  # Web scraping logic
+│   └── odeon-scraper.js      # Web scraping logic for Odeon
 ├── services/
 │   └── movie-tracker.js      # Movie tracking and notification logic
 ├── public/
-│   ├── index.html            # Main web interface
+│   ├── index.html            # Main web interface (Vue.js)
 │   ├── styles.css            # Styling
-│   └── app.js                # Frontend JavaScript
+│   └── app.js                # Vue.js application
 └── data/
     ├── tracked-movies.json   # Stored tracked movies
     └── notifications.json    # Stored notifications
@@ -132,44 +142,68 @@ claude/
 
 ## How It Works
 
-1. **Scraping**: The app uses Cineworld's public API endpoints when available, falling back to HTML scraping if needed
+1. **Scraping**: The app attempts to use Odeon's website structure to fetch movie data, trying multiple methods for reliability
 2. **Tracking**: Movies are stored in a JSON file with their tracking status
 3. **Checking**: A cron job runs every 30 minutes to check all tracked movies
 4. **Notifications**: When a movie status changes from "not found" to "found", a notification is created
 5. **Persistence**: All data is stored in JSON files in the `data/` directory
+6. **Reactive UI**: Vue.js provides a modern, reactive user interface with real-time updates
+
+## Vue.js Features
+
+The frontend uses Vue.js 3 for:
+- **Reactive Data Binding**: Automatic UI updates when data changes
+- **Component-based Architecture**: Clean, maintainable code structure
+- **Declarative Rendering**: Easy-to-read templates with v-if, v-for, v-model
+- **Event Handling**: Simple @click and @submit handlers
+- **Computed Properties**: Efficient date formatting and status updates
 
 ## Configuration
 
 - **Check Interval**: Modify the cron schedule in `server.js` (default: `*/30 * * * *` = every 30 minutes)
 - **Port**: Set the `PORT` environment variable (default: 3000)
+- **Cinemas**: Update default cinemas in `scraper/odeon-scraper.js` if needed
 
 ## Notes
 
-- The scraper is designed to work with Cineworld UK's website structure
-- If Cineworld changes their website, the scraper may need updates
+- The scraper is designed to work with Odeon Ireland's website structure
+- If Odeon changes their website, the scraper may need updates
 - The app respects rate limits by checking at reasonable intervals
 - All data is stored locally - no external database required
+- Vue.js is loaded from CDN for simplicity (no build step needed)
 
 ## Troubleshooting
 
 **Movies not being found:**
-- Check that the movie name matches exactly (or closely) to how it appears on Cineworld's website
+- Check that the movie name matches exactly (or closely) to how it appears on Odeon's website
 - Try searching manually first to see if the movie is listed
-- The movie may not be released yet
+- The movie may not be released yet at that specific cinema
 
 **Scraper not working:**
-- Cineworld may have changed their website structure
+- Odeon may have changed their website structure
 - Check the console logs for error messages
 - Network issues may prevent scraping
+- Try accessing the Odeon website directly to verify it's accessible
+
+**Vue.js not loading:**
+- Check your internet connection (Vue is loaded from CDN)
+- Check browser console for JavaScript errors
+- Ensure you're using a modern browser that supports Vue.js 3
 
 ## Future Enhancements
 
 - Email/SMS notifications
-- Support for other cinema chains
+- Support for other Irish cinema chains (IMC, Omniplex)
 - Advanced search with filters (date, time, format)
-- Browser notifications
+- Browser push notifications
 - Mobile app
+- User accounts and cloud sync
+- Price tracking
 
 ## License
 
 MIT
+
+## About
+
+This app was created to help movie lovers in Dublin track when their favorite films become available at Odeon cinemas. Built with modern web technologies for a fast, responsive experience.
