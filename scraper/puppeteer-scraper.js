@@ -451,25 +451,32 @@ async function scrapeMovies(cinemaId) {
               try {
                 const movieHTML = await page.content();
                 const fs = require('fs');
-                fs.writeFileSync(`debug-movie-page.html`, movieHTML);
-                await page.screenshot({ path: 'debug-movie-page.png', fullPage: true });
-                console.log(`      💾 Movie page HTML and screenshot saved for debugging`);
+                const path = require('path');
+
+                // Save to project root
+                const debugDir = path.join(__dirname, '..');
+
+                fs.writeFileSync(path.join(debugDir, 'debug-movie-page.html'), movieHTML);
+                await page.screenshot({ path: path.join(debugDir, 'debug-movie-page.png'), fullPage: true });
+                console.log(`      💾 Movie page HTML and screenshot saved to: ${debugDir}`);
 
                 // Also save captured API responses and request URLs
                 if (apiResponses.length > 0) {
-                  fs.writeFileSync(`debug-api-responses.json`, JSON.stringify(apiResponses, null, 2));
+                  fs.writeFileSync(path.join(debugDir, 'debug-api-responses.json'), JSON.stringify(apiResponses, null, 2));
                   console.log(`      💾 Captured ${apiResponses.length} API responses`);
                 }
 
                 if (requestUrls.length > 0) {
-                  fs.writeFileSync(`debug-api-requests.json`, JSON.stringify({
+                  fs.writeFileSync(path.join(debugDir, 'debug-api-requests.json'), JSON.stringify({
                     count: requestUrls.length,
                     urls: requestUrls,
                     uniqueUrls: [...new Set(requestUrls)]
                   }, null, 2));
                   console.log(`      💾 Captured ${requestUrls.length} API requests`);
                 }
-              } catch (e) {}
+              } catch (e) {
+                console.log(`      ⚠ Debug save error: ${e.message}`);
+              }
             }
 
             // Extract showtime information using MULTIPLE strategies
