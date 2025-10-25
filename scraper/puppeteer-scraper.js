@@ -111,10 +111,11 @@ async function scrapeMovies(cinemaId) {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
     // Collect movies from multiple pages (now showing + coming soon)
+    // Try multiple URL variations since some may 404
     const pagesToCheck = [
       { url: `https://www.odeoncinemas.ie/cinemas/${cinemaId}/`, name: 'Main page' },
-      { url: `https://www.odeoncinemas.ie/cinemas/${cinemaId}/whats-on/`, name: 'Whats On' },
-      { url: `https://www.odeoncinemas.ie/cinemas/${cinemaId}/coming-soon/`, name: 'Coming Soon' }
+      { url: `https://www.odeoncinemas.ie/cinemas/${cinemaId}/films/`, name: 'Films' },
+      { url: `https://www.odeoncinemas.ie/films/?cinema=${cinemaId}`, name: 'Films Filter' }
     ];
 
     const allMovies = new Map(); // Use map to deduplicate by URL
@@ -130,7 +131,58 @@ async function scrapeMovies(cinemaId) {
         // Wait longer for dynamic content and JavaScript
         await new Promise(resolve => setTimeout(resolve, 3000));
 
-        // Scroll to trigger lazy loading
+        // Check if page is a 404 error
+        const pageTitle = await page.title();
+        const pageText = await page.evaluate(() => document.body.textContent);
+
+        if (pageTitle.toLowerCase().includes('404') ||
+            pageTitle.toLowerCase().includes('not found') ||
+            pageText.toLowerCase().includes('page you are looking for has lost the plot') ||
+            pageText.toLowerCase().includes('page not found')) {
+          console.log(`   ⚠ ${pageInfo.name} returned 404 error, skipping...`);
+          continue;
+        }
+
+        // Scroll to trigger lazy loading and click "Load More" buttons
+        await page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight);
+        });
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Try to click "Load More", "Show More", "View All" buttons
+        try {
+          const loadMoreClicked = await page.evaluate(() => {
+            const buttons = Array.from(document.querySelectorAll('button, a'));
+            const loadMoreBtn = buttons.find(btn => {
+              const text = btn.textContent.toLowerCase();
+              return text.includes('load more') ||
+                     text.includes('show more') ||
+                     text.includes('view all') ||
+                     text.includes('see all') ||
+                     text.includes('coming soon');
+            });
+
+            if (loadMoreBtn && loadMoreBtn.tagName === 'BUTTON') {
+              loadMoreBtn.click();
+              return true;
+            } else if (loadMoreBtn && loadMoreBtn.tagName === 'A') {
+              // Return the href instead of clicking
+              return loadMoreBtn.getAttribute('href');
+            }
+            return false;
+          });
+
+          if (loadMoreClicked === true) {
+            console.log(`      🔘 Clicked "Load More" button`);
+            await new Promise(resolve => setTimeout(resolve, 3000));
+          } else if (typeof loadMoreClicked === 'string') {
+            console.log(`      🔗 Found link: ${loadMoreClicked}`);
+          }
+        } catch (e) {
+          // No load more button, that's fine
+        }
+
+        // Scroll again to load any newly added content
         await page.evaluate(() => {
           window.scrollTo(0, document.body.scrollHeight);
         });
