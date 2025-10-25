@@ -65,25 +65,73 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
       await new Promise(resolve => setTimeout(resolve, 4000));
     }
 
-    // Extract showtimes
+    // Click date buttons to load more showtimes
+    const dateClicked = await page.evaluate(() => {
+      let clicked = 0;
+      document.querySelectorAll('button, a, [role="button"]').forEach(btn => {
+        const text = btn.textContent.toLowerCase();
+        if (text.match(/mon|tue|wed|thu|fri|sat|sun|tomorrow|today/) && text.length < 50) {
+          try { btn.click(); clicked++; } catch(e) {}
+        }
+      });
+      return clicked;
+    });
+    if (dateClicked > 0) {
+      console.log(`      📅 Clicked ${dateClicked} date buttons`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    // Scroll to trigger lazy loading
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Extract showtimes using multiple strategies
     const showtimes = await page.evaluate(() => {
       const times = [];
-      document.querySelectorAll('button, a, [role="button"]').forEach(btn => {
+
+      // Strategy 1: Find ALL buttons/links with time patterns
+      document.querySelectorAll('button, a, [role="button"], [class*="session"], [class*="showtime"]').forEach(btn => {
         const text = btn.textContent?.trim() || '';
-        const match = text.match(/(\d{1,2}):(\d{2})/);
-        if (match) {
+        const ariaLabel = btn.getAttribute('aria-label') || '';
+        const fullText = text + ' ' + ariaLabel;
+
+        // Look for time patterns (14:30, 19:00, etc.)
+        const timeMatch = fullText.match(/(\d{1,2}):(\d{2})/);
+
+        if (timeMatch) {
+          // Try to find date context
+          let dateText = 'Today';
+          let parent = btn.closest('[class*="date"], [data-date], [id*="date"]');
+          if (parent) {
+            dateText = parent.getAttribute('data-date') ||
+                      parent.querySelector('[class*="date"]')?.textContent?.trim() ||
+                      parent.textContent?.match(/(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Today|Tomorrow)/i)?.[0] ||
+                      'Today';
+          }
+
+          // Check format (IMAX, 3D, Dolby, etc.)
+          let format = 'Standard';
+          if (fullText.toUpperCase().includes('IMAX')) {
+            format = 'IMAX';
+          } else if (fullText.includes('3D')) {
+            format = '3D';
+          } else if (fullText.toUpperCase().includes('DOLBY')) {
+            format = 'Dolby';
+          }
+
           times.push({
-            time: match[0],
-            date: 'Today',
-            format: text.includes('IMAX') ? 'IMAX' : 'Standard',
+            time: timeMatch[0],
+            date: dateText,
+            format: format,
             source: 'button'
           });
         }
       });
-      // Deduplicate
+
+      // Deduplicate by date-time-format
       const seen = new Set();
       return times.filter(t => {
-        const key = `${t.date}-${t.time}`;
+        const key = `${t.date}-${t.time}-${t.format}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
