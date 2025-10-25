@@ -512,7 +512,7 @@ async function scrapeMovies(cinemaId) {
                 console.log(`      ✅ Selected cinema: ${cinemaId}`);
                 await new Promise(resolve => setTimeout(resolve, 4000)); // Wait longer for showtimes to load
               } else {
-                console.log(`      ⚠ Could not find cinema selector for: ${cinemaId}`);
+                console.log(`      ℹ️  Cinema selector not needed (already showing ${cinemaId})`);
               }
 
               // Step 4: Click date buttons to show showtimes for different days

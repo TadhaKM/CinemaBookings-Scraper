@@ -164,18 +164,28 @@ async function checkTrackedMovies() {
           movie.status = 'found';
           movie.foundAt = new Date().toISOString();
 
+          // Calculate showtime count
+          const showtimeCount = foundMovie.showtimeCount ||
+                               (Array.isArray(foundMovie.showtimes) ? foundMovie.showtimes.length : 0);
+
           addNotification(
             movie.movieName,
             movie.cinemaName,
             {
               showtimes: foundMovie.showtimes,
+              showtimeCount: showtimeCount,
               movieId: foundMovie.id,
               releaseDate: foundMovie.releaseDate
             }
           );
         }
 
-        console.log(`✓ Found: ${movie.movieName} (${foundMovie.showtimes} showtimes)`);
+        // Display showtime count properly
+        const showtimeCount = foundMovie.showtimeCount ||
+                             (Array.isArray(foundMovie.showtimes) ? foundMovie.showtimes.length :
+                             (typeof foundMovie.showtimes === 'number' ? foundMovie.showtimes : 0));
+
+        console.log(`✓ Found: ${movie.movieName} (${showtimeCount} showtimes)`);
       } else {
         console.log(`✗ Not found: ${movie.movieName}`);
       }
