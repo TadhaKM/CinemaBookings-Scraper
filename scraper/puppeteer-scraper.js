@@ -99,6 +99,44 @@ async function scrapeCinemas() {
 }
 
 /**
+ * Try to fetch showtimes from Odeon API directly
+ */
+async function tryOdeonAPI(cinemaId, filmId) {
+  const axios = require('axios');
+
+  // Common API patterns to try
+  const apiPatterns = [
+    `https://www.odeoncinemas.ie/api/v1/cinemas/${cinemaId}/films/${filmId}/sessions`,
+    `https://www.odeoncinemas.ie/api/v1/sessions?cinema=${cinemaId}&film=${filmId}`,
+    `https://www.odeoncinemas.ie/api/sessions/${cinemaId}/${filmId}`,
+    `https://www.odeoncinemas.ie/api/showtimes?cinema=${cinemaId}&film=${filmId}`,
+    `https://api.odeoncinemas.ie/v1/sessions?cinema=${cinemaId}&film=${filmId}`,
+  ];
+
+  for (const url of apiPatterns) {
+    try {
+      const response = await axios.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json',
+          'Referer': 'https://www.odeoncinemas.ie/'
+        },
+        timeout: 5000
+      });
+
+      if (response.data && response.status === 200) {
+        console.log(`   ✅ Found API endpoint: ${url}`);
+        return response.data;
+      }
+    } catch (e) {
+      // API endpoint doesn't exist, try next
+    }
+  }
+
+  return null;
+}
+
+/**
  * Scrape movies for a specific cinema using Puppeteer
  */
 async function scrapeMovies(cinemaId) {
@@ -106,6 +144,40 @@ async function scrapeMovies(cinemaId) {
 
   const browser = await getBrowser();
   const page = await browser.newPage();
+
+  // Intercept network requests to capture API calls
+  const apiResponses = [];
+  const requestUrls = [];
+
+  await page.on('request', (request) => {
+    const url = request.url();
+    // Track all requests to find API patterns
+    if (url.includes('/api/') || url.includes('showtime') || url.includes('session') || url.includes('performance') || url.includes('film')) {
+      requestUrls.push(url);
+    }
+  });
+
+  await page.on('response', async (response) => {
+    const url = response.url();
+
+    // Capture API responses that might contain movie or showtime data
+    if (url.includes('/api/') || url.includes('showtime') || url.includes('session') || url.includes('performance')) {
+      try {
+        const contentType = response.headers()['content-type'] || '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          apiResponses.push({
+            url: url,
+            data: data,
+            status: response.status()
+          });
+          console.log(`   📡 Captured API response: ${url} (${response.status()})`);
+        }
+      } catch (e) {
+        // Not JSON or already consumed
+      }
+    }
+  });
 
   try {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
@@ -382,60 +454,152 @@ async function scrapeMovies(cinemaId) {
                 fs.writeFileSync(`debug-movie-page.html`, movieHTML);
                 await page.screenshot({ path: 'debug-movie-page.png', fullPage: true });
                 console.log(`      💾 Movie page HTML and screenshot saved for debugging`);
+
+                // Also save captured API responses and request URLs
+                if (apiResponses.length > 0) {
+                  fs.writeFileSync(`debug-api-responses.json`, JSON.stringify(apiResponses, null, 2));
+                  console.log(`      💾 Captured ${apiResponses.length} API responses`);
+                }
+
+                if (requestUrls.length > 0) {
+                  fs.writeFileSync(`debug-api-requests.json`, JSON.stringify({
+                    count: requestUrls.length,
+                    urls: requestUrls,
+                    uniqueUrls: [...new Set(requestUrls)]
+                  }, null, 2));
+                  console.log(`      💾 Captured ${requestUrls.length} API requests`);
+                }
               } catch (e) {}
             }
 
-            // Extract showtime information with AGGRESSIVE extraction
+            // Extract showtime information using MULTIPLE strategies
             const showtimes = await page.evaluate(() => {
               const times = [];
               const debug = {
                 totalButtons: 0,
                 buttonsWithTime: 0,
                 totalElements: 0,
-                elementsWithTime: 0
+                elementsWithTime: 0,
+                reactStateFound: false,
+                jsonLdFound: false
               };
 
-              // Strategy 1: Find ALL buttons that might be showtimes
-              const buttons = document.querySelectorAll('button, a, [role="button"]');
+              // Strategy 1: Extract from React state (window.__INITIAL_STATE__ or similar)
+              try {
+                const stateKeys = Object.keys(window).filter(k =>
+                  k.includes('INITIAL') || k.includes('STATE') || k.includes('REDUX') || k.includes('__')
+                );
+
+                for (const key of stateKeys) {
+                  const stateData = window[key];
+                  if (stateData && typeof stateData === 'object') {
+                    debug.reactStateFound = true;
+                    // Try to find showtime/session data in the state
+                    const stateStr = JSON.stringify(stateData);
+                    if (stateStr.includes('showtime') || stateStr.includes('session') || stateStr.includes('performance')) {
+                      console.log('Found React state with showtime data:', key);
+                      // Deep search for times in the state
+                      const timeMatches = stateStr.match(/(\d{1,2}):(\d{2})/g);
+                      if (timeMatches) {
+                        timeMatches.forEach(time => {
+                          times.push({
+                            time: time,
+                            date: 'Unknown',
+                            format: 'Standard',
+                            source: 'react-state'
+                          });
+                        });
+                      }
+                    }
+                  }
+                }
+              } catch (e) {}
+
+              // Strategy 2: Extract from JSON-LD structured data
+              try {
+                const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
+                jsonLdScripts.forEach(script => {
+                  try {
+                    const data = JSON.parse(script.textContent);
+                    if (data && data['@type'] === 'Movie') {
+                      debug.jsonLdFound = true;
+                      // Some sites include showtime data in structured data
+                    }
+                  } catch (e) {}
+                });
+              } catch (e) {}
+
+              // Strategy 3: Extract from data attributes
+              try {
+                const elementsWithData = document.querySelectorAll('[data-showtime], [data-session], [data-performance], [data-time]');
+                elementsWithData.forEach(el => {
+                  const showtime = el.getAttribute('data-showtime') ||
+                                  el.getAttribute('data-session') ||
+                                  el.getAttribute('data-performance') ||
+                                  el.getAttribute('data-time');
+
+                  if (showtime) {
+                    const timeMatch = showtime.match(/(\d{1,2}):(\d{2})/);
+                    if (timeMatch) {
+                      times.push({
+                        time: timeMatch[0],
+                        date: el.getAttribute('data-date') || 'Unknown',
+                        format: el.getAttribute('data-format') || 'Standard',
+                        source: 'data-attribute'
+                      });
+                    }
+                  }
+                });
+              } catch (e) {}
+
+              // Strategy 4: Find ALL buttons that might be showtimes
+              const buttons = document.querySelectorAll('button, a, [role="button"], [class*="session"], [class*="showtime"], [class*="performance"]');
               debug.totalButtons = buttons.length;
 
               buttons.forEach(btn => {
                 const text = btn.textContent?.trim() || '';
                 const href = btn.getAttribute('href') || '';
+                const ariaLabel = btn.getAttribute('aria-label') || '';
 
                 // Look for time patterns (14:30, 19:00, etc.)
-                const timeMatch = text.match(/(\d{1,2}):(\d{2})/);
+                const timeMatch = text.match(/(\d{1,2}):(\d{2})/) || ariaLabel.match(/(\d{1,2}):(\d{2})/);
 
                 if (timeMatch) {
                   debug.buttonsWithTime++;
+
                   // Try to find date context
                   let dateText = 'Today';
 
                   // Look for date in parent elements
-                  let parent = btn.closest('[class*="date"], [data-date]');
+                  let parent = btn.closest('[class*="date"], [data-date], [id*="date"]');
                   if (parent) {
                     dateText = parent.getAttribute('data-date') ||
                               parent.querySelector('[class*="date"]')?.textContent?.trim() ||
+                              parent.textContent?.match(/(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Today|Tomorrow)/i)?.[0] ||
                               'Today';
                   }
 
                   // Check if it's IMAX or other format
                   let format = 'Standard';
-                  if (text.toUpperCase().includes('IMAX')) {
+                  const fullText = text + ' ' + ariaLabel;
+                  if (fullText.toUpperCase().includes('IMAX')) {
                     format = 'IMAX';
-                  } else if (text.includes('3D')) {
+                  } else if (fullText.includes('3D')) {
                     format = '3D';
+                  } else if (fullText.toUpperCase().includes('DOLBY')) {
+                    format = 'Dolby';
                   }
 
                   times.push({
                     time: timeMatch[0],
                     date: dateText,
-                    format: format
+                    format: format,
+                    source: 'button'
                   });
                 }
               });
 
-              // Strategy 2: Look for ANY element with time-like text
+              // Strategy 5: Look for ANY element with time-like text (if no times found yet)
               if (times.length === 0) {
                 const allElements = document.querySelectorAll('*');
                 debug.totalElements = allElements.length;
@@ -453,7 +617,8 @@ async function scrapeMovies(cinemaId) {
                     times.push({
                       time: timeMatch[0],
                       date: 'Today',
-                      format: text.includes('IMAX') ? 'IMAX' : 'Standard'
+                      format: text.includes('IMAX') ? 'IMAX' : 'Standard',
+                      source: 'element-scan'
                     });
                   }
                 });
@@ -474,9 +639,16 @@ async function scrapeMovies(cinemaId) {
             const showtimeData = showtimes.showtimes || showtimes;
             const showtimeDebug = showtimes.debug || {};
 
-            // Log debug info if no showtimes found
-            if (showtimeData.length === 0 && moviesWithShowtimes.length === 0) {
-              console.log(`      🔍 Debug: ${showtimeDebug.totalButtons} buttons (${showtimeDebug.buttonsWithTime} with time), ${showtimeDebug.totalElements} elements scanned`);
+            // Log detailed debug info
+            if (moviesWithShowtimes.length === 0) {
+              console.log(`      🔍 Debug info:`);
+              console.log(`         - Buttons scanned: ${showtimeDebug.totalButtons} (${showtimeDebug.buttonsWithTime} with time)`);
+              console.log(`         - React state found: ${showtimeDebug.reactStateFound}`);
+              console.log(`         - JSON-LD found: ${showtimeDebug.jsonLdFound}`);
+              console.log(`         - API responses captured: ${apiResponses.length}`);
+              if (showtimeData.length > 0) {
+                console.log(`         - Sources: ${[...new Set(showtimeData.map(s => s.source))].join(', ')}`);
+              }
             }
 
             moviesWithShowtimes.push({
