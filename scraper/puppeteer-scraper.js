@@ -336,7 +336,36 @@ async function scrapeMovies(cinemaId) {
             });
 
             // Wait longer for JavaScript to load showtimes
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            // Try to click date buttons to show showtimes for different days
+            try {
+              const dateButtonsClicked = await page.evaluate(() => {
+                const dateButtons = Array.from(document.querySelectorAll('button, a, [role="button"]'))
+                  .filter(btn => {
+                    const text = btn.textContent.toLowerCase();
+                    // Look for date-like text (day names, "tomorrow", etc.)
+                    return text.match(/mon|tue|wed|thu|fri|sat|sun|tomorrow|today/) &&
+                           text.length < 50; // Not a huge container
+                  });
+
+                // Click first few date buttons to load their showtimes
+                dateButtons.slice(0, 3).forEach(btn => {
+                  if (btn.tagName === 'BUTTON' || btn.tagName === 'A') {
+                    try {
+                      btn.click();
+                    } catch (e) {}
+                  }
+                });
+
+                return dateButtons.length;
+              });
+
+              if (dateButtonsClicked > 0) {
+                console.log(`      📅 Clicked ${dateButtonsClicked} date buttons`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+              }
+            } catch (e) {}
 
             // Scroll to trigger lazy loading of showtimes
             await page.evaluate(() => {
@@ -344,22 +373,30 @@ async function scrapeMovies(cinemaId) {
             });
             await new Promise(resolve => setTimeout(resolve, 1000));
 
-            // DEBUG: Save movie page HTML for first movie
+            // DEBUG: Save movie page HTML and screenshot for first movie
             if (moviesWithShowtimes.length === 0) {
               try {
                 const movieHTML = await page.content();
                 const fs = require('fs');
                 fs.writeFileSync(`debug-movie-page.html`, movieHTML);
-                console.log(`      💾 Movie page HTML saved for debugging`);
+                await page.screenshot({ path: 'debug-movie-page.png', fullPage: true });
+                console.log(`      💾 Movie page HTML and screenshot saved for debugging`);
               } catch (e) {}
             }
 
             // Extract showtime information with AGGRESSIVE extraction
             const showtimes = await page.evaluate(() => {
               const times = [];
+              const debug = {
+                totalButtons: 0,
+                buttonsWithTime: 0,
+                totalElements: 0,
+                elementsWithTime: 0
+              };
 
               // Strategy 1: Find ALL buttons that might be showtimes
               const buttons = document.querySelectorAll('button, a, [role="button"]');
+              debug.totalButtons = buttons.length;
 
               buttons.forEach(btn => {
                 const text = btn.textContent?.trim() || '';
@@ -369,6 +406,7 @@ async function scrapeMovies(cinemaId) {
                 const timeMatch = text.match(/(\d{1,2}):(\d{2})/);
 
                 if (timeMatch) {
+                  debug.buttonsWithTime++;
                   // Try to find date context
                   let dateText = 'Today';
 
@@ -399,6 +437,7 @@ async function scrapeMovies(cinemaId) {
               // Strategy 2: Look for ANY element with time-like text
               if (times.length === 0) {
                 const allElements = document.querySelectorAll('*');
+                debug.totalElements = allElements.length;
 
                 allElements.forEach(el => {
                   const text = el.textContent?.trim() || '';
@@ -409,6 +448,7 @@ async function scrapeMovies(cinemaId) {
                   const timeMatch = text.match(/\b(\d{1,2}):(\d{2})\b/);
 
                   if (timeMatch && el.children.length === 0) { // Leaf node only
+                    debug.elementsWithTime++;
                     times.push({
                       time: timeMatch[0],
                       date: 'Today',
@@ -427,19 +467,27 @@ async function scrapeMovies(cinemaId) {
                 return true;
               });
 
-              return unique;
+              return { showtimes: unique, debug };
             });
+
+            const showtimeData = showtimes.showtimes || showtimes;
+            const showtimeDebug = showtimes.debug || {};
+
+            // Log debug info if no showtimes found
+            if (showtimeData.length === 0 && moviesWithShowtimes.length === 0) {
+              console.log(`      🔍 Debug: ${showtimeDebug.totalButtons} buttons (${showtimeDebug.buttonsWithTime} with time), ${showtimeDebug.totalElements} elements scanned`);
+            }
 
             moviesWithShowtimes.push({
               id: movie.id,
               name: movie.name,
-              available: showtimes.length > 0,
-              showtimes: showtimes,
-              showtimeCount: showtimes.length,
+              available: showtimeData.length > 0,
+              showtimes: showtimeData,
+              showtimeCount: showtimeData.length,
               releaseDate: null
             });
 
-            console.log(`      ✓ ${showtimes.length} showtimes found`);
+            console.log(`      ✓ ${showtimeData.length} showtimes found`);
 
           } catch (error) {
             console.log(`      ⚠ Failed to fetch showtimes: ${error.message}`);
