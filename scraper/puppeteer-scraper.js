@@ -407,17 +407,11 @@ async function scrapeMovies(cinemaId) {
             // Wait longer for JavaScript to load showtimes
             await new Promise(resolve => setTimeout(resolve, 3000));
 
-            // Try to click "Book Now", "Book Tickets", or cinema selector buttons first
+            // CRITICAL: Click buttons to reveal showtimes (Odeon requires selecting a cinema first!)
             try {
-              const bookingClicked = await page.evaluate((cinemaId) => {
-                const allButtons = Array.from(document.querySelectorAll('button, a, [role="button"], select, option'));
-                let clicked = {
-                  bookNow: false,
-                  cinemaSelect: false,
-                  dateButtons: 0
-                };
-
-                // Strategy 1: Click "Book Now" or "Book Tickets" button
+              // Step 1: Click "Book Now" or "Book Tickets" button
+              const bookNowClicked = await page.evaluate(() => {
+                const allButtons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
                 const bookButton = allButtons.find(btn => {
                   const text = (btn.textContent || '').toLowerCase();
                   return text.includes('book now') ||
@@ -426,59 +420,123 @@ async function scrapeMovies(cinemaId) {
                          text.includes('get tickets');
                 });
 
-                if (bookButton && bookButton.tagName !== 'SELECT') {
+                if (bookButton) {
                   try {
                     bookButton.click();
-                    clicked.bookNow = true;
+                    return true;
                   } catch (e) {}
                 }
+                return false;
+              });
 
-                // Strategy 2: Select cinema from dropdown if it exists
-                const cinemaSelect = document.querySelector('select[name*="cinema"], select[id*="cinema"], select.cinema-select');
-                if (cinemaSelect) {
-                  const options = Array.from(cinemaSelect.querySelectorAll('option'));
-                  const cinemaOption = options.find(opt =>
-                    opt.value.toLowerCase().includes(cinemaId.toLowerCase()) ||
-                    opt.textContent.toLowerCase().includes(cinemaId.toLowerCase())
-                  );
-
-                  if (cinemaOption) {
-                    try {
-                      cinemaSelect.value = cinemaOption.value;
-                      cinemaSelect.dispatchEvent(new Event('change', { bubbles: true }));
-                      clicked.cinemaSelect = true;
-                    } catch (e) {}
-                  }
-                }
-
-                // Strategy 3: Click date buttons to show showtimes for different days
-                const dateButtons = allButtons.filter(btn => {
-                  const text = (btn.textContent || '').toLowerCase();
-                  return text.match(/mon|tue|wed|thu|fri|sat|sun|tomorrow|today/);
-                });
-
-                dateButtons.slice(0, 3).forEach(btn => {
-                  if (btn.tagName === 'BUTTON' || btn.tagName === 'A') {
-                    try {
-                      btn.click();
-                      clicked.dateButtons++;
-                    } catch (e) {}
-                  }
-                });
-
-                return clicked;
-              }, cinemaId);
-
-              if (bookingClicked.bookNow) {
+              if (bookNowClicked) {
                 console.log(`      🎫 Clicked "Book Now" button`);
                 await new Promise(resolve => setTimeout(resolve, 3000));
               }
-              if (bookingClicked.cinemaSelect) {
-                console.log(`      🎬 Selected cinema from dropdown`);
-                await new Promise(resolve => setTimeout(resolve, 2000));
+
+              // Step 2: Click "Add Cinema", "Select Cinema", or "Change Cinema" button
+              const addCinemaClicked = await page.evaluate(() => {
+                const allButtons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+                const addCinemaButton = allButtons.find(btn => {
+                  const text = (btn.textContent || '').toLowerCase();
+                  return text.includes('add cinema') ||
+                         text.includes('select cinema') ||
+                         text.includes('change cinema') ||
+                         text.includes('choose cinema') ||
+                         text.includes('find cinema');
+                });
+
+                if (addCinemaButton) {
+                  try {
+                    addCinemaButton.click();
+                    return true;
+                  } catch (e) {}
+                }
+                return false;
+              });
+
+              if (addCinemaClicked) {
+                console.log(`      🎬 Clicked "Add/Select Cinema" button`);
+                await new Promise(resolve => setTimeout(resolve, 3000));
               }
-              if (bookingClicked.dateButtons > 0) {
-                console.log(`      📅 Clicked ${bookingClicked.dateButtons} date buttons`);
+
+              // Step 3: Select the specific cinema we're searching for
+              const cinemaSelected = await page.evaluate((cinemaId) => {
+                const allElements = Array.from(document.querySelectorAll('button, a, [role="button"], label, div[role="option"]'));
+
+                // Try to find cinema by name/ID in various formats
+                const cinemaNames = {
+                  'blanchardstown': ['blanchardstown'],
+                  'charlestown': ['charlestown'],
+                  'point-square': ['point square', 'point village'],
+                  'naas': ['naas']
+                };
+
+                const searchTerms = cinemaNames[cinemaId.toLowerCase()] || [cinemaId];
+
+                const cinemaElement = allElements.find(el => {
+                  const text = (el.textContent || '').toLowerCase();
+                  return searchTerms.some(term => text.includes(term));
+                });
+
+                if (cinemaElement) {
+                  try {
+                    cinemaElement.click();
+                    return true;
+                  } catch (e) {}
+                }
+
+                // Also try dropdowns
+                const selects = Array.from(document.querySelectorAll('select'));
+                for (const select of selects) {
+                  const options = Array.from(select.querySelectorAll('option'));
+                  const cinemaOption = options.find(opt => {
+                    const text = (opt.textContent || '').toLowerCase();
+                    const value = (opt.value || '').toLowerCase();
+                    return searchTerms.some(term => text.includes(term) || value.includes(term));
+                  });
+
+                  if (cinemaOption) {
+                    try {
+                      select.value = cinemaOption.value;
+                      select.dispatchEvent(new Event('change', { bubbles: true }));
+                      return true;
+                    } catch (e) {}
+                  }
+                }
+
+                return false;
+              }, cinemaId);
+
+              if (cinemaSelected) {
+                console.log(`      ✅ Selected cinema: ${cinemaId}`);
+                await new Promise(resolve => setTimeout(resolve, 4000)); // Wait longer for showtimes to load
+              } else {
+                console.log(`      ⚠ Could not find cinema selector for: ${cinemaId}`);
+              }
+
+              // Step 4: Click date buttons to show showtimes for different days
+              const dateButtonsClicked = await page.evaluate(() => {
+                const allButtons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+                const dateButtons = allButtons.filter(btn => {
+                  const text = (btn.textContent || '').toLowerCase();
+                  return text.match(/mon|tue|wed|thu|fri|sat|sun|tomorrow|today/) &&
+                         text.length < 50;
+                });
+
+                let clicked = 0;
+                dateButtons.slice(0, 3).forEach(btn => {
+                  try {
+                    btn.click();
+                    clicked++;
+                  } catch (e) {}
+                });
+
+                return clicked;
+              });
+
+              if (dateButtonsClicked > 0) {
+                console.log(`      📅 Clicked ${dateButtonsClicked} date buttons`);
                 await new Promise(resolve => setTimeout(resolve, 2000));
               }
             } catch (e) {
