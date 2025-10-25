@@ -389,10 +389,51 @@ async function scrapeMovies(cinemaId) {
       return [];
     }
 
-    console.log(`✓ Found ${movieList.length} total unique movies across all pages, fetching showtimes...`);
+    console.log(`✓ Found ${movieList.length} total unique movies`);
 
-        // Now visit each movie page to get showtimes
-        const moviesWithShowtimes = [];
+    // Return movies WITHOUT showtimes for now (much faster!)
+    // Showtimes will be fetched only for searched movie
+    const moviesWithoutShowtimes = movieList.map(movie => ({
+      id: movie.id,
+      name: movie.name,
+      url: movie.url,
+      available: true,
+      showtimes: [], // Empty for now
+      showtimeCount: 0,
+      releaseDate: null
+    }));
+
+    await page.close();
+    return moviesWithoutShowtimes;
+  } catch (error) {
+    console.error('⚠ Puppeteer movie scraping failed:', error.message);
+    await page.close();
+    throw error;
+  }
+}
+
+/**
+ * Fetch showtimes for a SPECIFIC movie (much faster!)
+ */
+async function scrapeMovieShowtimes(movieUrl, cinemaId) {
+  console.log(`🎬 Fetching showtimes for movie at ${cinemaId}...`);
+
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+
+  try {
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+    await page.goto(movieUrl, {
+      waitUntil: 'networkidle2',
+      timeout: 15000
+    });
+
+    // Wait for JavaScript to load
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // Click buttons to reveal showtimes
+    const moviesWithShowtimes = [];
 
         // Process all movies but only fetch detailed showtimes for first 20 to save time
         for (const movie of movieList.slice(0, 20)) { // Fetch showtimes for first 20

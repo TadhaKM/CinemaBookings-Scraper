@@ -3,6 +3,7 @@ const cheerio = require('cheerio');
 const Fuse = require('fuse.js');
 const { getMockCinemas, getMockMovies } = require('./mock-data');
 const puppeteerScraper = require('./puppeteer-scraper');
+const { getMovieShowtimes } = require('./puppeteer-scraper-simple');
 
 // Odeon Ireland API and website URLs
 const ODEON_WEBSITE = 'https://www.odeoncinemas.ie';
@@ -310,6 +311,17 @@ async function searchMovie(movieName, cinemaId) {
 
       console.log(`✓ Found ${matches.length} matches using fuzzy search`);
       matches.forEach(m => console.log(`  - "${m.name}" (score: ${m.matchScore.toFixed(3)})`));
+
+      // NOW fetch showtimes for ONLY the best match (much faster!)
+      if (matches.length > 0 && USE_PUPPETEER && matches[0].url) {
+        try {
+          const showtimes = await getMovieShowtimes(matches[0].url, cinemaId);
+          matches[0].showtimes = showtimes;
+          matches[0].showtimeCount = showtimes.length;
+        } catch (error) {
+          console.log(`⚠ Could not fetch showtimes: ${error.message}`);
+        }
+      }
 
       return {
         found: matches.length > 0,
