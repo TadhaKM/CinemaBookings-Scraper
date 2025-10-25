@@ -130,13 +130,24 @@ async function scrapeMovies(cinemaId) {
         // Wait longer for dynamic content and JavaScript
         await new Promise(resolve => setTimeout(resolve, 3000));
 
+        // Scroll to trigger lazy loading
+        await page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight);
+        });
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        await page.evaluate(() => {
+          window.scrollTo(0, 0);
+        });
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
         // DEBUG: Screenshot
         try {
-          await page.screenshot({ path: `debug-${pageInfo.name.replace(/\s+/g, '-')}.png` });
+          await page.screenshot({ path: `debug-${pageInfo.name.replace(/\s+/g, '-')}.png`, fullPage: true });
           console.log(`   📸 Screenshot: debug-${pageInfo.name.replace(/\s+/g, '-')}.png`);
         } catch (e) {}
 
-        // DEBUG: Check page content
+        // DEBUG: Check page content and save HTML
         const pageHTML = await page.content();
         const hasBahubali = pageHTML.toLowerCase().includes('bahubali');
         console.log(`   🔎 Page contains "bahubali": ${hasBahubali}`);
@@ -144,21 +155,34 @@ async function scrapeMovies(cinemaId) {
           console.log(`   🎯 FOUND BAHUBALI IN HTML! Now extracting...`);
         }
 
+        // Save HTML for analysis
+        try {
+          const fs = require('fs');
+          fs.writeFileSync(`debug-${pageInfo.name.replace(/\s+/g, '-')}.html`, pageHTML);
+          console.log(`   💾 HTML saved: debug-${pageInfo.name.replace(/\s+/g, '-')}.html`);
+        } catch (e) {}
+
         // Extract movie data from the page using MULTIPLE strategies
         const pageMovies = await page.evaluate(() => {
           const results = [];
-          const debugInfo = {};
+          const debugInfo = {
+            selectors: {}
+          };
 
           // Strategy 1: Links with /films/ in href
           const filmLinks = document.querySelectorAll('a[href*="/films/"]');
-          debugInfo.filmLinksCount = filmLinks.length;
+          debugInfo.selectors['a[href*="/films/"]'] = filmLinks.length;
 
           // Strategy 2: ANY link with movie-like class names
           const movieElements = document.querySelectorAll('[class*="film"], [class*="movie"], [data-film], article');
-          debugInfo.movieElementsCount = movieElements.length;
+          debugInfo.selectors['movie elements'] = movieElements.length;
+
+          // Strategy 3: Try common movie grid/list patterns
+          const gridItems = document.querySelectorAll('.grid-item, .movie-card, .film-card, .card');
+          debugInfo.selectors['grid items'] = gridItems.length;
 
           // Combine all potential movie elements
-          const allElements = new Set([...filmLinks, ...movieElements]);
+          const allElements = new Set([...filmLinks, ...movieElements, ...gridItems]);
           debugInfo.combinedCount = allElements.size;
 
           allElements.forEach((elem) => {
@@ -201,16 +225,27 @@ async function scrapeMovies(cinemaId) {
           const seen = new Map();
           results.forEach(m => seen.set(m.url, m));
 
-          return Array.from(seen.values());
+          debugInfo.resultsFound = results.length;
+
+          return {
+            movies: Array.from(seen.values()),
+            debug: debugInfo
+          };
         });
 
-        console.log(`   🔍 Found ${pageMovies.length} movie links on ${pageInfo.name}`);
-        if (pageMovies.length > 0) {
-          console.log(`      Movies: ${pageMovies.slice(0, 5).map(m => m.name).join(', ')}${pageMovies.length > 5 ? '...' : ''}`);
+        const pageMoviesData = pageMovies.movies || pageMovies;
+        const debugData = pageMovies.debug || {};
+
+        console.log(`   🔍 Found ${pageMoviesData.length} movie links on ${pageInfo.name}`);
+        if (debugData.selectors) {
+          console.log(`      Debug - Selectors matched:`, JSON.stringify(debugData.selectors));
+        }
+        if (pageMoviesData.length > 0) {
+          console.log(`      Movies: ${pageMoviesData.slice(0, 5).map(m => m.name).join(', ')}${pageMoviesData.length > 5 ? '...' : ''}`);
         }
 
         // Add to combined list (deduplicates by URL)
-        pageMovies.forEach(movie => {
+        pageMoviesData.forEach(movie => {
           allMovies.set(movie.url, movie);
         });
 
@@ -250,6 +285,22 @@ async function scrapeMovies(cinemaId) {
 
             // Wait longer for JavaScript to load showtimes
             await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Scroll to trigger lazy loading of showtimes
+            await page.evaluate(() => {
+              window.scrollTo(0, document.body.scrollHeight);
+            });
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // DEBUG: Save movie page HTML for first movie
+            if (moviesWithShowtimes.length === 0) {
+              try {
+                const movieHTML = await page.content();
+                const fs = require('fs');
+                fs.writeFileSync(`debug-movie-page.html`, movieHTML);
+                console.log(`      💾 Movie page HTML saved for debugging`);
+              } catch (e) {}
+            }
 
             // Extract showtime information with AGGRESSIVE extraction
             const showtimes = await page.evaluate(() => {
