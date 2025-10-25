@@ -413,26 +413,8 @@ async function scrapeMovies(cinemaId) {
 }
 
 /**
- * Fetch showtimes for a SPECIFIC movie (much faster!)
+ * Close the browser when shutting down
  */
-async function scrapeMovieShowtimes(movieUrl, cinemaId) {
-  console.log(`🎬 Fetching showtimes for movie at ${cinemaId}...`);
-
-  const browser = await getBrowser();
-  const page = await browser.newPage();
-
-  try {
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-    await page.goto(movieUrl, {
-      waitUntil: 'networkidle2',
-      timeout: 15000
-    });
-
-    // Wait for JavaScript to load
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Click buttons to reveal showtimes
 async function closeBrowser() {
   if (browser) {
     console.log('Closing Puppeteer browser...');
