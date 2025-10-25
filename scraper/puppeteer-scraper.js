@@ -136,18 +136,30 @@ async function scrapeMovies(cinemaId) {
           console.log(`   📸 Screenshot: debug-${pageInfo.name.replace(/\s+/g, '-')}.png`);
         } catch (e) {}
 
+        // DEBUG: Check page content
+        const pageHTML = await page.content();
+        const hasBahubali = pageHTML.toLowerCase().includes('bahubali');
+        console.log(`   🔎 Page contains "bahubali": ${hasBahubali}`);
+        if (hasBahubali) {
+          console.log(`   🎯 FOUND BAHUBALI IN HTML! Now extracting...`);
+        }
+
         // Extract movie data from the page using MULTIPLE strategies
         const pageMovies = await page.evaluate(() => {
           const results = [];
+          const debugInfo = {};
 
           // Strategy 1: Links with /films/ in href
           const filmLinks = document.querySelectorAll('a[href*="/films/"]');
+          debugInfo.filmLinksCount = filmLinks.length;
 
           // Strategy 2: ANY link with movie-like class names
           const movieElements = document.querySelectorAll('[class*="film"], [class*="movie"], [data-film], article');
+          debugInfo.movieElementsCount = movieElements.length;
 
           // Combine all potential movie elements
           const allElements = new Set([...filmLinks, ...movieElements]);
+          debugInfo.combinedCount = allElements.size;
 
           allElements.forEach((elem) => {
             // Try to find a link within or use the element itself
@@ -204,6 +216,12 @@ async function scrapeMovies(cinemaId) {
 
       } catch (error) {
         console.log(`   ⚠ Failed to load ${pageInfo.name}:`, error.message);
+        console.log(`   Full error:`, error.stack);
+        // Try to take screenshot even on error
+        try {
+          await page.screenshot({ path: `error-${pageInfo.name.replace(/\s+/g, '-')}.png` });
+          console.log(`   📸 Error screenshot: error-${pageInfo.name.replace(/\s+/g, '-')}.png`);
+        } catch (e) {}
         continue;
       }
     }
