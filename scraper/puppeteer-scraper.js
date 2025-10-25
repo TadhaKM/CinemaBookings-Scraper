@@ -273,11 +273,7 @@ async function scrapeMovies(cinemaId) {
 
         // DEBUG: Check page content and save HTML
         const pageHTML = await page.content();
-        const hasBahubali = pageHTML.toLowerCase().includes('bahubali');
-        console.log(`   🔎 Page contains "bahubali": ${hasBahubali}`);
-        if (hasBahubali) {
-          console.log(`   🎯 FOUND BAHUBALI IN HTML! Now extracting...`);
-        }
+        console.log(`   📄 Page loaded, extracting movies...`);
 
         // Save HTML for analysis
         try {
@@ -411,34 +407,83 @@ async function scrapeMovies(cinemaId) {
             // Wait longer for JavaScript to load showtimes
             await new Promise(resolve => setTimeout(resolve, 3000));
 
-            // Try to click date buttons to show showtimes for different days
+            // Try to click "Book Now", "Book Tickets", or cinema selector buttons first
             try {
-              const dateButtonsClicked = await page.evaluate(() => {
-                const dateButtons = Array.from(document.querySelectorAll('button, a, [role="button"]'))
-                  .filter(btn => {
-                    const text = btn.textContent.toLowerCase();
-                    // Look for date-like text (day names, "tomorrow", etc.)
-                    return text.match(/mon|tue|wed|thu|fri|sat|sun|tomorrow|today/) &&
-                           text.length < 50; // Not a huge container
-                  });
+              const bookingClicked = await page.evaluate((cinemaId) => {
+                const allButtons = Array.from(document.querySelectorAll('button, a, [role="button"], select, option'));
+                let clicked = {
+                  bookNow: false,
+                  cinemaSelect: false,
+                  dateButtons: 0
+                };
 
-                // Click first few date buttons to load their showtimes
+                // Strategy 1: Click "Book Now" or "Book Tickets" button
+                const bookButton = allButtons.find(btn => {
+                  const text = (btn.textContent || '').toLowerCase();
+                  return text.includes('book now') ||
+                         text.includes('book tickets') ||
+                         text.includes('buy tickets') ||
+                         text.includes('get tickets');
+                });
+
+                if (bookButton && bookButton.tagName !== 'SELECT') {
+                  try {
+                    bookButton.click();
+                    clicked.bookNow = true;
+                  } catch (e) {}
+                }
+
+                // Strategy 2: Select cinema from dropdown if it exists
+                const cinemaSelect = document.querySelector('select[name*="cinema"], select[id*="cinema"], select.cinema-select');
+                if (cinemaSelect) {
+                  const options = Array.from(cinemaSelect.querySelectorAll('option'));
+                  const cinemaOption = options.find(opt =>
+                    opt.value.toLowerCase().includes(cinemaId.toLowerCase()) ||
+                    opt.textContent.toLowerCase().includes(cinemaId.toLowerCase())
+                  );
+
+                  if (cinemaOption) {
+                    try {
+                      cinemaSelect.value = cinemaOption.value;
+                      cinemaSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                      clicked.cinemaSelect = true;
+                    } catch (e) {}
+                  }
+                }
+
+                // Strategy 3: Click date buttons to show showtimes for different days
+                const dateButtons = allButtons.filter(btn => {
+                  const text = (btn.textContent || '').toLowerCase();
+                  return text.match(/mon|tue|wed|thu|fri|sat|sun|tomorrow|today/);
+                });
+
                 dateButtons.slice(0, 3).forEach(btn => {
                   if (btn.tagName === 'BUTTON' || btn.tagName === 'A') {
                     try {
                       btn.click();
+                      clicked.dateButtons++;
                     } catch (e) {}
                   }
                 });
 
-                return dateButtons.length;
-              });
+                return clicked;
+              }, cinemaId);
 
-              if (dateButtonsClicked > 0) {
-                console.log(`      📅 Clicked ${dateButtonsClicked} date buttons`);
+              if (bookingClicked.bookNow) {
+                console.log(`      🎫 Clicked "Book Now" button`);
+                await new Promise(resolve => setTimeout(resolve, 3000));
+              }
+              if (bookingClicked.cinemaSelect) {
+                console.log(`      🎬 Selected cinema from dropdown`);
                 await new Promise(resolve => setTimeout(resolve, 2000));
               }
-            } catch (e) {}
+              if (bookingClicked.dateButtons > 0) {
+                console.log(`      📅 Clicked ${bookingClicked.dateButtons} date buttons`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+              }
+            } catch (e) {
+              console.log(`      ⚠ Button click error: ${e.message}`);
+            }
 
             // Scroll to trigger lazy loading of showtimes
             await page.evaluate(() => {
