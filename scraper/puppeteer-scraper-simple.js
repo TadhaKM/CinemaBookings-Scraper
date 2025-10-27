@@ -83,6 +83,16 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
     if (selected) {
       console.log(`      ✅ Selected cinema: ${cinemaId}`);
       await new Promise(resolve => setTimeout(resolve, 7000)); // Wait longer for API calls
+
+      // Debug: Save screenshot and HTML after selecting cinema
+      try {
+        await page.screenshot({ path: path.join(__dirname, '..', 'debug-after-cinema-select.png') });
+        const html = await page.content();
+        fs.writeFileSync(path.join(__dirname, '..', 'debug-after-cinema-select.html'), html);
+        console.log(`      📸 Saved screenshot and HTML after cinema selection`);
+      } catch (e) {
+        console.log(`      ⚠ Could not save debug files: ${e.message}`);
+      }
     }
 
     // Click date buttons to load more showtimes
@@ -107,6 +117,52 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
 
     // First try to extract from captured API responses
     let showtimes = [];
+
+    // Extract film ID and site ID from captured responses for direct API call
+    let filmId = null;
+    let siteId = null;
+
+    for (const { url, data } of apiResponses) {
+      if (data && data.film && data.film.id) {
+        filmId = data.film.id;
+      }
+      if (data && data.filmScreeningDates) {
+        for (const dateEntry of data.filmScreeningDates) {
+          if (dateEntry.filmScreenings) {
+            for (const screening of dateEntry.filmScreenings) {
+              if (screening.sites && screening.sites[0]) {
+                siteId = screening.sites[0].siteId;
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Try direct Vista API call if we have film and site IDs
+    if (filmId && siteId) {
+      console.log(`      🎯 Making direct Vista API call: filmId=${filmId}, siteId=${siteId}`);
+      try {
+        const vistaUrl = `https://vwc.odeoncinemas.ie/WSVistaWebClient/ocapi/v1/sessions/by-business-date/first?siteIds=${siteId}&filmIds=${filmId}`;
+        const vistaResponse = await page.evaluate(async (url) => {
+          try {
+            const response = await fetch(url);
+            return await response.json();
+          } catch (e) {
+            return null;
+          }
+        }, vistaUrl);
+
+        if (vistaResponse) {
+          console.log(`      🔍 Vista API response keys:`, Object.keys(vistaResponse || {}).join(', '));
+          console.log(`      🔍 Vista API response sample:`, JSON.stringify(vistaResponse).substring(0, 500));
+          apiResponses.push({ url: vistaUrl, data: vistaResponse });
+        }
+      } catch (e) {
+        console.log(`      ⚠ Vista API call failed: ${e.message}`);
+      }
+    }
 
     if (apiResponses.length > 0) {
       console.log(`      📡 Processing ${apiResponses.length} API responses...`);
