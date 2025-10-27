@@ -270,41 +270,53 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
       showtimes = await page.evaluate(() => {
         const times = [];
 
-        // Strategy 1: Search ALL text content for time patterns
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-        let node;
-        while (node = walker.nextNode()) {
-          const text = node.textContent || '';
+        // Helper: Check if time looks like a session time (not a runtime/duration)
+        const isValidSessionTime = (timeStr) => {
+          const [hours, mins] = timeStr.split(':').map(Number);
+          // Session times are typically 08:00 - 23:59
+          // Exclude 00:00-03:00 (these are usually runtimes like 01:30 = 1h 30m)
+          if (hours < 4) return false;
+          if (hours > 23) return false;
+          if (mins > 59) return false;
+          return true;
+        };
+
+        // Strategy 1: Look in showtime picker / session containers
+        const showtimeContainers = document.querySelectorAll(
+          '[class*="showtime"], [class*="session"], [class*="picker"], [id*="showtime"], [id*="session"]'
+        );
+
+        showtimeContainers.forEach(container => {
+          const text = container.textContent || '';
           const timeMatches = text.matchAll(/(\d{1,2}):(\d{2})/g);
+
           for (const match of timeMatches) {
-            let parent = node.parentElement;
-            let dateText = 'Unknown';
+            const time = match[0];
+            if (!isValidSessionTime(time)) continue;
+
+            let dateText = 'Today';
             let format = 'Standard';
 
-            // Search up the DOM for date/format context
-            while (parent) {
-              const parentText = parent.textContent || '';
-              if (!dateText || dateText === 'Unknown') {
-                const dateMatch = parentText.match(/(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Today|Tomorrow)/i);
-                if (dateMatch) dateText = dateMatch[0];
-              }
-              if (parentText.toUpperCase().includes('IMAX')) format = 'IMAX';
-              else if (parentText.includes('3D')) format = '3D';
-              else if (parentText.toUpperCase().includes('DOLBY')) format = 'Dolby';
-              parent = parent.parentElement;
-            }
+            // Search container for date/format context
+            const containerText = container.textContent || '';
+            const dateMatch = containerText.match(/(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Today|Tomorrow)/i);
+            if (dateMatch) dateText = dateMatch[0];
+
+            if (containerText.toUpperCase().includes('IMAX')) format = 'IMAX';
+            else if (containerText.includes('3D')) format = '3D';
+            else if (containerText.toUpperCase().includes('DOLBY')) format = 'Dolby';
 
             times.push({
-              time: match[0],
+              time: time,
               date: dateText,
               format: format,
-              source: 'html-text'
+              source: 'html-container'
             });
           }
-        }
+        });
 
-        // Strategy 2: Find ALL buttons/links with time patterns
-        document.querySelectorAll('button, a, [role="button"], [class*="session"], [class*="showtime"], [class*="time"]').forEach(btn => {
+        // Strategy 2: Find clickable time buttons (highest confidence)
+        document.querySelectorAll('button, a, [role="button"]').forEach(btn => {
           const text = btn.textContent?.trim() || '';
           const ariaLabel = btn.getAttribute('aria-label') || '';
           const fullText = text + ' ' + ariaLabel;
@@ -312,7 +324,7 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
           // Look for time patterns (14:30, 19:00, etc.)
           const timeMatch = fullText.match(/(\d{1,2}):(\d{2})/);
 
-          if (timeMatch) {
+          if (timeMatch && isValidSessionTime(timeMatch[0])) {
             // Try to find date context
             let dateText = 'Today';
             let parent = btn.closest('[class*="date"], [data-date], [id*="date"]');
