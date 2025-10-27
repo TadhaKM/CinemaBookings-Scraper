@@ -1,7 +1,7 @@
 const express = require('express');
 const path = require('path');
 const cron = require('node-cron');
-const odeonScraper = require('./scraper/odeon-scraper');
+const cinemaScraper = require('./scraper/cinema-scraper');
 const movieTracker = require('./services/movie-tracker');
 
 const app = express();
@@ -13,10 +13,21 @@ app.use(express.static('public'));
 
 // API Routes
 
+// Get all cinema chains
+app.get('/api/chains', (req, res) => {
+  try {
+    const chains = cinemaScraper.getCinemaChains();
+    res.json(chains);
+  } catch (error) {
+    console.error('Error fetching cinema chains:', error);
+    res.status(500).json({ error: 'Failed to fetch cinema chains' });
+  }
+});
+
 // Get all cinemas
 app.get('/api/cinemas', async (req, res) => {
   try {
-    const cinemas = await odeonScraper.getCinemas();
+    const cinemas = await cinemaScraper.getAllCinemas();
     res.json(cinemas);
   } catch (error) {
     console.error('Error fetching cinemas:', error);
@@ -28,7 +39,7 @@ app.get('/api/cinemas', async (req, res) => {
 app.get('/api/cinemas/:cinemaId/movies', async (req, res) => {
   try {
     const { cinemaId } = req.params;
-    const movies = await odeonScraper.getMovies(cinemaId);
+    const movies = await cinemaScraper.getMovies(cinemaId);
     res.json(movies);
   } catch (error) {
     console.error('Error fetching movies:', error);
@@ -40,7 +51,7 @@ app.get('/api/cinemas/:cinemaId/movies', async (req, res) => {
 app.get('/api/search', async (req, res) => {
   try {
     const { movie, cinema } = req.query;
-    const results = await odeonScraper.searchMovie(movie, cinema);
+    const results = await cinemaScraper.searchMovie(movie, cinema);
     res.json(results);
   } catch (error) {
     console.error('Error searching movie:', error);
@@ -53,7 +64,7 @@ app.get('/api/debug/cinema/:cinemaId', async (req, res) => {
   try {
     const { cinemaId } = req.params;
     console.log(`\n========== DEBUG: Fetching movies for ${cinemaId} ==========`);
-    const movies = await odeonScraper.getMovies(cinemaId);
+    const movies = await cinemaScraper.getMovies(cinemaId);
     console.log(`========== DEBUG: Found ${movies.length} movies ==========\n`);
     res.json({
       cinemaId,
@@ -164,6 +175,7 @@ app.post('/api/check', async (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Odeon Dublin Movie Tracker running on http://localhost:${PORT}`);
+  console.log(`Dublin Cinema Tracker running on http://localhost:${PORT}`);
+  console.log('Supported chains: Odeon, Vue, Cineworld');
   console.log('Scheduled checks will run every 30 minutes');
 });
