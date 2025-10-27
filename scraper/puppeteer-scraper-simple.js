@@ -144,20 +144,30 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
     if (filmId && siteId) {
       console.log(`      🎯 Making direct Vista API call: filmId=${filmId}, siteId=${siteId}`);
       try {
-        const vistaUrl = `https://vwc.odeoncinemas.ie/WSVistaWebClient/ocapi/v1/sessions/by-business-date/first?siteIds=${siteId}&filmIds=${filmId}`;
+        const vistaUrl = `https://vwc.odeoncinemas.ie/WSVistaWebClient/ocapi/v1/showtimes/by-business-date/first?siteIds=${siteId}&filmIds=${filmId}`;
         const vistaResponse = await page.evaluate(async (url) => {
           try {
             const response = await fetch(url);
-            return await response.json();
+            if (!response.ok) {
+              console.log(`Vista API HTTP error: ${response.status}`);
+              return { error: `HTTP ${response.status}` };
+            }
+            const data = await response.json();
+            return data;
           } catch (e) {
-            return null;
+            console.log(`Vista API fetch error: ${e.message}`);
+            return { error: e.message };
           }
         }, vistaUrl);
 
         if (vistaResponse) {
           console.log(`      🔍 Vista API response keys:`, Object.keys(vistaResponse || {}).join(', '));
           console.log(`      🔍 Vista API response sample:`, JSON.stringify(vistaResponse).substring(0, 500));
-          apiResponses.push({ url: vistaUrl, data: vistaResponse });
+          if (!vistaResponse.error) {
+            apiResponses.push({ url: vistaUrl, data: vistaResponse });
+          }
+        } else {
+          console.log(`      ⚠ Vista API returned null`);
         }
       } catch (e) {
         console.log(`      ⚠ Vista API call failed: ${e.message}`);
@@ -244,11 +254,57 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
     if (showtimes.length === 0) {
       console.log(`      🔍 API extraction found 0 showtimes, trying HTML...`);
 
+      // Log what's on the page for debugging
+      const pageInfo = await page.evaluate(() => {
+        const bodyText = document.body.textContent;
+        const timeMatches = bodyText.match(/\d{1,2}:\d{2}/g) || [];
+        return {
+          hasText: bodyText.length > 0,
+          timeMatchCount: timeMatches.length,
+          sampleTimes: timeMatches.slice(0, 5),
+          elementCount: document.querySelectorAll('*').length
+        };
+      });
+      console.log(`      🔍 Page has ${pageInfo.elementCount} elements, ${pageInfo.timeMatchCount} time patterns found:`, pageInfo.sampleTimes.join(', '));
+
       showtimes = await page.evaluate(() => {
         const times = [];
 
-        // Strategy 1: Find ALL buttons/links with time patterns
-        document.querySelectorAll('button, a, [role="button"], [class*="session"], [class*="showtime"]').forEach(btn => {
+        // Strategy 1: Search ALL text content for time patterns
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let node;
+        while (node = walker.nextNode()) {
+          const text = node.textContent || '';
+          const timeMatches = text.matchAll(/(\d{1,2}):(\d{2})/g);
+          for (const match of timeMatches) {
+            let parent = node.parentElement;
+            let dateText = 'Unknown';
+            let format = 'Standard';
+
+            // Search up the DOM for date/format context
+            while (parent) {
+              const parentText = parent.textContent || '';
+              if (!dateText || dateText === 'Unknown') {
+                const dateMatch = parentText.match(/(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Today|Tomorrow)/i);
+                if (dateMatch) dateText = dateMatch[0];
+              }
+              if (parentText.toUpperCase().includes('IMAX')) format = 'IMAX';
+              else if (parentText.includes('3D')) format = '3D';
+              else if (parentText.toUpperCase().includes('DOLBY')) format = 'Dolby';
+              parent = parent.parentElement;
+            }
+
+            times.push({
+              time: match[0],
+              date: dateText,
+              format: format,
+              source: 'html-text'
+            });
+          }
+        }
+
+        // Strategy 2: Find ALL buttons/links with time patterns
+        document.querySelectorAll('button, a, [role="button"], [class*="session"], [class*="showtime"], [class*="time"]').forEach(btn => {
           const text = btn.textContent?.trim() || '';
           const ariaLabel = btn.getAttribute('aria-label') || '';
           const fullText = text + ' ' + ariaLabel;
