@@ -349,10 +349,50 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
               time: timeMatch[0],
               date: dateText,
               format: format,
-              source: 'html'
+              source: 'html-button'
             });
           }
         });
+
+        // Strategy 3: If nothing found yet, search ALL divs/spans (last resort)
+        if (times.length === 0) {
+          const allElements = document.querySelectorAll('div, span, li, p');
+          allElements.forEach(el => {
+            const text = el.textContent?.trim() || '';
+
+            // Only look at elements with very short text (likely just a time)
+            if (text.length < 20) {
+              const timeMatch = text.match(/^(\d{1,2}):(\d{2})$/);
+              if (timeMatch && isValidSessionTime(timeMatch[0])) {
+                let dateText = 'Today';
+                let format = 'Standard';
+
+                // Search parent tree for context
+                let parent = el.parentElement;
+                let depth = 0;
+                while (parent && depth < 10) {
+                  const parentText = parent.textContent || '';
+                  if (dateText === 'Today') {
+                    const dateMatch = parentText.match(/(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Today|Tomorrow)/i);
+                    if (dateMatch) dateText = dateMatch[0];
+                  }
+                  if (parentText.toUpperCase().includes('IMAX')) format = 'IMAX';
+                  else if (parentText.includes('3D')) format = '3D';
+                  else if (parentText.toUpperCase().includes('DOLBY')) format = 'Dolby';
+                  parent = parent.parentElement;
+                  depth++;
+                }
+
+                times.push({
+                  time: timeMatch[0],
+                  date: dateText,
+                  format: format,
+                  source: 'html-div'
+                });
+              }
+            }
+          });
+        }
 
         return times;
       });
