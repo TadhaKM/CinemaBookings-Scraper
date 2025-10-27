@@ -110,6 +110,10 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
 
       for (const { url, data } of apiResponses) {
         try {
+          // Debug: Log the structure of the API response
+          console.log(`      🔍 API response keys:`, Object.keys(data || {}).join(', '));
+          console.log(`      🔍 API response sample:`, JSON.stringify(data).substring(0, 300));
+
           // Vista WebClient API structure
           if (data && data.Dates) {
             for (const dateEntry of data.Dates) {
