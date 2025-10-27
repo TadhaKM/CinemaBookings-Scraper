@@ -24,6 +24,23 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
   const browser = await getBrowser();
   const page = await browser.newPage();
 
+  // Capture API responses
+  const apiResponses = [];
+
+  page.on('response', async (response) => {
+    const url = response.url();
+    if (url.includes('showtime') || url.includes('session') || url.includes('WSVistaWebClient')) {
+      try {
+        const contentType = response.headers()['content-type'] || '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          apiResponses.push({ url, data });
+          console.log(`      📡 API captured: showtimes endpoint`);
+        }
+      } catch (e) {}
+    }
+  });
+
   try {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
     await page.goto(movieUrl, { waitUntil: 'networkidle2', timeout: 15000 });
@@ -85,62 +102,134 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Extract showtimes using multiple strategies
-    const showtimes = await page.evaluate(() => {
-      const times = [];
+    // First try to extract from captured API responses
+    let showtimes = [];
 
-      // Strategy 1: Find ALL buttons/links with time patterns
-      document.querySelectorAll('button, a, [role="button"], [class*="session"], [class*="showtime"]').forEach(btn => {
-        const text = btn.textContent?.trim() || '';
-        const ariaLabel = btn.getAttribute('aria-label') || '';
-        const fullText = text + ' ' + ariaLabel;
+    if (apiResponses.length > 0) {
+      console.log(`      📡 Processing ${apiResponses.length} API responses...`);
 
-        // Look for time patterns (14:30, 19:00, etc.)
-        const timeMatch = fullText.match(/(\d{1,2}):(\d{2})/);
+      for (const { url, data } of apiResponses) {
+        try {
+          // Vista WebClient API structure
+          if (data && data.Dates) {
+            for (const dateEntry of data.Dates) {
+              const dateStr = dateEntry.Date || dateEntry.BusinessDate || 'Unknown';
 
-        if (timeMatch) {
-          // Try to find date context
-          let dateText = 'Today';
-          let parent = btn.closest('[class*="date"], [data-date], [id*="date"]');
-          if (parent) {
-            dateText = parent.getAttribute('data-date') ||
-                      parent.querySelector('[class*="date"]')?.textContent?.trim() ||
-                      parent.textContent?.match(/(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Today|Tomorrow)/i)?.[0] ||
-                      'Today';
+              if (dateEntry.Sessions && Array.isArray(dateEntry.Sessions)) {
+                for (const session of dateEntry.Sessions) {
+                  const time = session.SessionTime || session.ShowTime;
+                  if (time) {
+                    let format = 'Standard';
+                    const attributes = session.Attributes || [];
+
+                    if (attributes.some(a => a.toUpperCase().includes('IMAX'))) {
+                      format = 'IMAX';
+                    } else if (attributes.some(a => a.includes('3D'))) {
+                      format = '3D';
+                    } else if (attributes.some(a => a.toUpperCase().includes('DOLBY'))) {
+                      format = 'Dolby';
+                    }
+
+                    showtimes.push({
+                      time: time,
+                      date: dateStr,
+                      format: format,
+                      source: 'api'
+                    });
+                  }
+                }
+              }
+            }
           }
+          // Alternative API structure
+          else if (data && Array.isArray(data)) {
+            for (const item of data) {
+              if (item.sessions || item.showtimes) {
+                const sessions = item.sessions || item.showtimes;
+                const dateStr = item.date || item.businessDate || 'Unknown';
 
-          // Check format (IMAX, 3D, Dolby, etc.)
-          let format = 'Standard';
-          if (fullText.toUpperCase().includes('IMAX')) {
-            format = 'IMAX';
-          } else if (fullText.includes('3D')) {
-            format = '3D';
-          } else if (fullText.toUpperCase().includes('DOLBY')) {
-            format = 'Dolby';
+                for (const session of sessions) {
+                  const time = session.time || session.sessionTime;
+                  if (time) {
+                    showtimes.push({
+                      time: time,
+                      date: dateStr,
+                      format: session.format || 'Standard',
+                      source: 'api'
+                    });
+                  }
+                }
+              }
+            }
           }
-
-          times.push({
-            time: timeMatch[0],
-            date: dateText,
-            format: format,
-            source: 'button'
-          });
+        } catch (e) {
+          console.log(`      ⚠ Error parsing API response: ${e.message}`);
         }
-      });
+      }
+    }
 
-      // Deduplicate by date-time-format
-      const seen = new Set();
-      return times.filter(t => {
-        const key = `${t.date}-${t.time}-${t.format}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
+    // If API extraction found nothing, fall back to HTML scraping
+    if (showtimes.length === 0) {
+      console.log(`      🔍 API extraction found 0 showtimes, trying HTML...`);
+
+      showtimes = await page.evaluate(() => {
+        const times = [];
+
+        // Strategy 1: Find ALL buttons/links with time patterns
+        document.querySelectorAll('button, a, [role="button"], [class*="session"], [class*="showtime"]').forEach(btn => {
+          const text = btn.textContent?.trim() || '';
+          const ariaLabel = btn.getAttribute('aria-label') || '';
+          const fullText = text + ' ' + ariaLabel;
+
+          // Look for time patterns (14:30, 19:00, etc.)
+          const timeMatch = fullText.match(/(\d{1,2}):(\d{2})/);
+
+          if (timeMatch) {
+            // Try to find date context
+            let dateText = 'Today';
+            let parent = btn.closest('[class*="date"], [data-date], [id*="date"]');
+            if (parent) {
+              dateText = parent.getAttribute('data-date') ||
+                        parent.querySelector('[class*="date"]')?.textContent?.trim() ||
+                        parent.textContent?.match(/(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Today|Tomorrow)/i)?.[0] ||
+                        'Today';
+            }
+
+            // Check format (IMAX, 3D, Dolby, etc.)
+            let format = 'Standard';
+            if (fullText.toUpperCase().includes('IMAX')) {
+              format = 'IMAX';
+            } else if (fullText.includes('3D')) {
+              format = '3D';
+            } else if (fullText.toUpperCase().includes('DOLBY')) {
+              format = 'Dolby';
+            }
+
+            times.push({
+              time: timeMatch[0],
+              date: dateText,
+              format: format,
+              source: 'html'
+            });
+          }
+        });
+
+        return times;
       });
+    }
+
+    // Deduplicate by date-time-format
+    const seen = new Set();
+    const uniqueShowtimes = showtimes.filter(t => {
+      const key = `${t.date}-${t.time}-${t.format}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
 
-    console.log(`      ✓ ${showtimes.length} showtimes found`);
+    console.log(`      ✓ ${uniqueShowtimes.length} showtimes found (${showtimes.filter(s => s.source === 'api').length} from API, ${showtimes.filter(s => s.source === 'html').length} from HTML)`);
     await page.close();
-    return showtimes;
+    return uniqueShowtimes;
 
   } catch (error) {
     console.error(`      ⚠ Showtime fetch error: ${error.message}`);
