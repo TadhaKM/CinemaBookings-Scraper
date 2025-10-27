@@ -1,4 +1,6 @@
 const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
 
 // Cache browser instance
 let browser = null;
@@ -169,6 +171,15 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
         } catch (e) {
           console.log(`      ⚠ Error parsing API response: ${e.message}`);
         }
+      }
+
+      // Save API responses to file for debugging
+      try {
+        const debugFile = path.join(__dirname, '..', 'debug-api-responses.json');
+        fs.writeFileSync(debugFile, JSON.stringify(apiResponses, null, 2));
+        console.log(`      💾 Saved ${apiResponses.length} API responses to debug-api-responses.json`);
+      } catch (e) {
+        console.log(`      ⚠ Could not save API responses: ${e.message}`);
       }
     }
 
