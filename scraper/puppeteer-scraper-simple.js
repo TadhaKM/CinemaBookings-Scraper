@@ -31,13 +31,14 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
 
   page.on('response', async (response) => {
     const url = response.url();
-    if (url.includes('showtime') || url.includes('session') || url.includes('WSVistaWebClient')) {
+    // Capture ALL API responses to find where session times are
+    if (url.includes('odeoncinemas.ie') || url.includes('WSVistaWebClient')) {
       try {
         const contentType = response.headers()['content-type'] || '';
         if (contentType.includes('application/json')) {
           const data = await response.json();
           apiResponses.push({ url, data });
-          console.log(`      📡 API captured: showtimes endpoint`);
+          console.log(`      📡 API captured: ${url.split('/').slice(-2).join('/')}`);
         }
       } catch (e) {}
     }
@@ -81,7 +82,7 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
     }, cinemaId);
     if (selected) {
       console.log(`      ✅ Selected cinema: ${cinemaId}`);
-      await new Promise(resolve => setTimeout(resolve, 4000));
+      await new Promise(resolve => setTimeout(resolve, 7000)); // Wait longer for API calls
     }
 
     // Click date buttons to load more showtimes
@@ -97,12 +98,12 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
     });
     if (dateClicked > 0) {
       console.log(`      📅 Clicked ${dateClicked} date buttons`);
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 4000)); // Wait longer for API calls
     }
 
     // Scroll to trigger lazy loading
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait longer for API calls
 
     // First try to extract from captured API responses
     let showtimes = [];
