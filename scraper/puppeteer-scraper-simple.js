@@ -82,7 +82,36 @@ async function getMovieShowtimes(movieUrl, cinemaId) {
     }, cinemaId);
     if (selected) {
       console.log(`      ✅ Selected cinema: ${cinemaId}`);
-      await new Promise(resolve => setTimeout(resolve, 7000)); // Wait longer for API calls
+
+      // Wait and check multiple times for session times to appear
+      let sessionDataFound = false;
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        const hasSessionData = await page.evaluate(() => {
+          // Check if any elements have actual session time text
+          const text = document.body.textContent;
+          const times = text.match(/\b(1[0-2]|[4-9]):[0-5]\d\b/g) || [];
+          // Filter out the config default times
+          const validTimes = times.filter(t => {
+            const [h] = t.split(':').map(Number);
+            return h >= 4 && h <= 23;
+          });
+          return validTimes.length > 0;
+        });
+
+        if (hasSessionData) {
+          console.log(`      ⏱️  Session times appeared after ${attempt * 3}s`);
+          sessionDataFound = true;
+          break;
+        } else {
+          console.log(`      ⏳ Waiting for session times (attempt ${attempt}/5)...`);
+        }
+      }
+
+      if (!sessionDataFound) {
+        console.log(`      ⚠️  No session times detected after 15s wait`);
+      }
 
       // Debug: Save screenshot and HTML after selecting cinema
       try {
