@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assignment Grading Tool</title>
+    <link rel="stylesheet" href="grading.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎓 Assignment Grading Tool</h1>
+            <p class="subtitle">AI-powered code evaluation and feedback</p>
+        </header>
+
+        <div class="form-container">
+            <form id="gradingForm">
+                <div class="form-group">
+                    <label for="markingScheme">
+                        <span class="label-title">Marking Scheme / Rubric</span>
+                        <span class="label-desc">Define how the assignment should be graded (e.g., functionality 40%, code quality 30%, documentation 30%)</span>
+                    </label>
+                    <textarea
+                        id="markingScheme"
+                        name="markingScheme"
+                        rows="6"
+                        placeholder="Example:&#10;- Functionality (40 points): Code runs without errors and meets all requirements&#10;- Code Quality (30 points): Clean, readable, follows best practices&#10;- Documentation (20 points): Well-commented, clear variable names&#10;- Testing (10 points): Includes test cases&#10;Total: 100 points"
+                        required
+                    ></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="expectedAnswer">
+                        <span class="label-title">Expected Answer / Solution</span>
+                        <span class="label-desc">Provide the ideal solution or key components that should be present</span>
+                    </label>
+                    <textarea
+                        id="expectedAnswer"
+                        name="expectedAnswer"
+                        rows="8"
+                        placeholder="Paste the expected code solution or describe the key requirements..."
+                        required
+                    ></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="studentCode">
+                        <span class="label-title">Student Code to Grade</span>
+                        <span class="label-desc">The actual code submission to be evaluated</span>
+                    </label>
+                    <textarea
+                        id="studentCode"
+                        name="studentCode"
+                        rows="12"
+                        placeholder="Paste the student's code here..."
+                        required
+                    ></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="expectedOutput">
+                        <span class="label-title">Expected Output / Appearance (Optional)</span>
+                        <span class="label-desc">Describe how the code should work or what it should produce</span>
+                    </label>
+                    <textarea
+                        id="expectedOutput"
+                        name="expectedOutput"
+                        rows="5"
+                        placeholder="Example:&#10;- When run with input [1, 2, 3], should output 6&#10;- Should display a login form with email and password fields&#10;- Should validate email format and show error messages"
+                    ></textarea>
+                </div>
+
+                <div class="button-group">
+                    <button type="submit" id="gradeButton" class="btn btn-primary">
+                        <span class="btn-text">Grade Assignment</span>
+                        <span class="btn-loading" style="display: none;">Grading...</span>
+                    </button>
+                    <button type="button" id="clearButton" class="btn btn-secondary">Clear Form</button>
+                </div>
+            </form>
+        </div>
+
+        <div id="results" class="results-container" style="display: none;">
+            <h2>Grading Results</h2>
+            <div id="resultsContent"></div>
+        </div>
+
+        <div id="error" class="error-container" style="display: none;"></div>
+    </div>
+
+    <script src="grading.js"></script>
+</body>
+</html>
