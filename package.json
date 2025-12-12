@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "grading": "node grading-server.js",
+    "grading:dev": "nodemon grading-server.js"
   },
   "keywords": [
     "odeon",
