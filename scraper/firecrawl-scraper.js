@@ -222,29 +222,31 @@ function humanizeSlug(slug) {
     .join(' ');
 }
 
+const STATUS_PRIORITY = { 'pre-book': 3, 'coming-soon': 2, 'now-showing': 1 };
+
 /**
- * Scrape ODEON's full film index — includes "now showing", "pre-book" and
- * "coming soon" titles. This is what lets us track films that aren't yet in
- * any cinema's daily listings.
+ * Scrape ODEON's ALL Films page — the single source of truth for every film's
+ * availability status (now showing / pre-book / coming soon), including titles
+ * that aren't in any cinema's daily listings yet.
  *
- * We derive the list from the page's links rather than LLM extraction: film
- * links follow a stable `/films/<slug>/<HO id>/` pattern, so this is complete
- * and deterministic (LLM extraction sometimes returned only the top carousel).
- * The human-friendly title comes from the film page later; the slug-derived
- * name here is only used for fuzzy matching the user's query.
+ * We parse the page markdown deterministically rather than via LLM extraction
+ * (which sometimes returned only the top carousel). Each film card carries its
+ * status label inline — "Coming soon" / "Pre-book now" — and now-showing films
+ * carry no label. Title, poster and certificate all come from the same card, so
+ * one cached scrape covers everything the tracker needs.
  */
 async function scrapeFilmIndex() {
   if (!API_KEY) throw new Error('FIRECRAWL_API_KEY is not set');
-  console.log('🔥 Firecrawl: scraping ODEON film index...');
+  console.log('🔥 Firecrawl: scraping ODEON ALL Films page...');
 
   const response = await fetch(FIRECRAWL_API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
     body: JSON.stringify({
       url: `${ODEON_WEBSITE}/films/`,
-      onlyMainContent: false,
+      onlyMainContent: true,
       waitFor: 6000,
-      formats: ['links']
+      formats: ['markdown']
     })
   });
 
@@ -254,26 +256,54 @@ async function scrapeFilmIndex() {
   }
 
   const payload = await response.json();
-  const links = payload.data?.links || [];
+  const md = payload.data?.markdown || '';
 
-  const filmRe = /\/films\/([a-z0-9-]+)\/(HO\d+)\/?$/i;
-  const films = [];
-  for (const link of links) {
-    const match = link.match(filmRe);
+  const filmRe = /\/films\/([a-z0-9-]+)\/(HO\d+)\//i;
+  const byId = new Map();
+
+  // Each film is a markdown list item ("- [ ... ](film-url) ..."). Split on the
+  // bullet so a card's status label can't bleed in from its neighbour.
+  for (const card of md.split(/\n\s*-\s+\[/)) {
+    const match = card.match(filmRe);
     if (!match) continue;
     const [, slug, filmId] = match;
-    films.push({
+
+    // Status label lives before the film URL inside the card.
+    const before = card.slice(0, card.indexOf(match[0]));
+    const status = /coming soon/i.test(before)
+      ? 'coming-soon'
+      : /pre.?book/i.test(before)
+        ? 'pre-book'
+        : 'now-showing';
+
+    const nameFromAlt = card.match(/!\[([^\]]+?)\s+poster\]/i);
+    const name = nameFromAlt ? nameFromAlt[1].trim() : humanizeSlug(slug);
+
+    const poster = card.match(/\((https:\/\/film-cdn[^)]+?Poster[^)]*)\)/i);
+    const cert = card.match(/!\[([^\]]+)\]\((?:https:\/\/vwc\.odeoncinemas\.ie)[^)]*RatingIconGraphic/i);
+
+    const film = {
       id: slug,
       filmId,
-      name: humanizeSlug(slug),
+      name,
       url: `${ODEON_WEBSITE}/films/${slug}/${filmId}/`,
-      posterUrl: null
-    });
+      status,
+      posterUrl: poster ? poster[1] : null,
+      certificate: cert ? cert[1].trim() : null
+    };
+
+    // Dedupe across "Top Films"/"All Films"; keep the most specific status.
+    const existing = byId.get(filmId);
+    if (!existing || STATUS_PRIORITY[status] > STATUS_PRIORITY[existing.status]) {
+      byId.set(filmId, { ...existing, ...film });
+    } else if (existing && !existing.posterUrl && film.posterUrl) {
+      existing.posterUrl = film.posterUrl;
+    }
   }
 
-  const unique = [...new Map(films.map((f) => [f.filmId, f])).values()];
-  console.log(`🔥 Firecrawl: film index has ${unique.length} titles`);
-  return unique;
+  const films = [...byId.values()];
+  console.log(`🔥 Firecrawl: ALL Films page → ${films.length} titles`);
+  return films;
 }
 
 /**

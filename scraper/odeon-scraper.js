@@ -253,17 +253,6 @@ async function findFilm(movieName) {
 }
 
 /**
- * Normalise the film-page status label into a stable key.
- */
-function normalizeStatus(raw) {
-  const s = String(raw || '').toLowerCase();
-  if (/now showing/.test(s)) return 'now-showing';
-  if (/pre.?book/.test(s)) return 'pre-book';
-  if (/coming soon/.test(s)) return 'coming-soon';
-  return 'coming-soon';
-}
-
-/**
  * Get showtimes for a film at a single cinema (from that cinema's listings).
  * Returns null if the film isn't currently listed there.
  */
@@ -334,32 +323,26 @@ async function checkFilm(movieName) {
     return { found: false, bookable: false, status: 'coming-soon', releaseDate: null, film: { name: movieName } };
   }
 
+  // Status comes straight from the cached ALL Films page — no per-film scrape.
   const film = await findFilm(movieName);
   if (!film) {
     return { found: false, bookable: false, status: 'not-listed', releaseDate: null, film: null };
   }
 
-  let details = {};
-  try {
-    details = await firecrawl.scrapeFilm(film.url);
-  } catch (error) {
-    console.error('⚠ Firecrawl film page scrape failed:', error.message);
-  }
-
-  const status = normalizeStatus(details.status);
+  const status = film.status || 'coming-soon';
   const bookable = status === 'now-showing' || status === 'pre-book';
 
   return {
     found: bookable,
     bookable,
     status,
-    releaseDate: details.releaseDate || null,
+    releaseDate: null,
     film: {
       name: film.name,
       url: film.url,
-      posterUrl: details.posterUrl || film.posterUrl || null,
-      certificate: details.certificate || null,
-      synopsis: details.synopsis || null
+      posterUrl: film.posterUrl || null,
+      certificate: film.certificate || null,
+      synopsis: null
     }
   };
 }
@@ -379,6 +362,24 @@ async function checkFilmDetailed(movieName, targets = [], { all = false } = {}) 
     film: base.film,
     showings: []
   };
+
+  // Search is user-initiated, so enrich with release date + synopsis from the
+  // film page (the ALL Films page doesn't carry these). The recurring tracker
+  // check never does this — it stays on the ALL Films page only.
+  if (base.film && base.film.url && firecrawl.isConfigured()) {
+    try {
+      const details = await firecrawl.scrapeFilm(base.film.url);
+      out.releaseDate = details.releaseDate || null;
+      out.film = {
+        ...base.film,
+        synopsis: details.synopsis || base.film.synopsis,
+        certificate: base.film.certificate || details.certificate || null,
+        posterUrl: base.film.posterUrl || details.posterUrl || null
+      };
+    } catch (error) {
+      console.error('⚠ Film page enrich failed (non-fatal):', error.message);
+    }
+  }
 
   if (base.bookable) {
     const cinemas = all || targets.length === 0 ? await getCinemas() : targets;

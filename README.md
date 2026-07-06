@@ -4,13 +4,14 @@ A web application that scrapes Odeon Cinema Dublin's website and notifies you wh
 
 ## Features
 
-- **Track Multiple Movies**: Add any movie you want to watch at any Odeon Dublin cinema
-- **Automatic Checking**: The app checks for movie availability every 30 minutes automatically
-- **Real-time Notifications**: Get instant notifications when your tracked movies become available
-- **Manual Search**: Search for movies immediately without waiting for scheduled checks
-- **Clean Web Interface**: Modern Vue.js-powered interface to manage your tracked movies
-- **Persistent Storage**: Your tracked movies and notifications are saved locally
-- **Dublin-Focused**: Specifically targets Odeon cinemas in Dublin
+- **Track coming-soon films**: Track a film even before it's bookable — the app watches ODEON's **ALL Films** listing and alerts you the moment it moves from *Coming soon* to *Pre-book* / *Now showing*
+- **One, several, or all cinemas**: Track a film at a specific Dublin ODEON, a few of them, or "any" cinema
+- **Automatic Checking**: Re-checks every 30 minutes automatically
+- **Real-time Notifications**: Get notified when a tracked film becomes bookable (with showtimes where available)
+- **Manual Search**: Look up a film's status and showtimes immediately
+- **Clean Web Interface**: Modern Vue.js interface with poster art and status badges
+- **Persistent Storage**: Tracked films and notifications are saved locally
+- **Dublin-Focused**: Targets ODEON cinemas in Dublin
 
 ## Technology Stack
 
@@ -153,7 +154,7 @@ CinemaBookings-Scraper/
 
 ## How It Works
 
-1. **Scraping**: Firecrawl loads the cinema page (rendering JavaScript) and an LLM extracts films + showtimes against a JSON schema. If Firecrawl isn't configured or a scrape fails, the app falls back to mock data
+1. **Scraping**: Availability is driven by ODEON's **ALL Films** page (`/films/`), which lists every title with its status (*Now showing* / *Pre-book now* / *Coming soon*) — including films not yet in any cinema's daily listings. Firecrawl renders the page and the status/title/poster are parsed from it. One cached scrape covers every tracked film; individual cinema pages are only scraped to fetch showtimes for films that are actually bookable. Falls back to mock data if Firecrawl isn't configured
 2. **Tracking**: Movies are stored in a JSON file with their tracking status
 3. **Checking**: A cron job runs every 30 minutes to check all tracked movies
 4. **Notifications**: When a movie status changes from "not found" to "found", a notification is created
