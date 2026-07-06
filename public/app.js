@@ -1,5 +1,13 @@
 const { createApp } = Vue;
 
+const STATUS_META = {
+  'now-showing': { label: 'Now showing', cls: 'st-now' },
+  'pre-book': { label: 'Pre-book now', cls: 'st-pre' },
+  'coming-soon': { label: 'Coming soon', cls: 'st-soon' },
+  'not-listed': { label: 'Not on ODEON', cls: 'st-none' },
+  unknown: { label: 'Checking…', cls: 'st-soon' }
+};
+
 createApp({
   data() {
     return {
@@ -7,23 +15,18 @@ createApp({
       trackedMovies: [],
       notifications: [],
       checking: false,
+      tracking: false,
       form: {
         movieName: '',
-        cinemaId: ''
+        anyCinema: true, // "any ODEON Dublin cinema"
+        selected: [] // specific cinema ids
       },
-      searchResults: {
+      search: {
         visible: false,
         loading: false,
-        found: false,
-        movies: [],
-        error: null,
-        availableMovies: []
+        data: null
       },
-      toast: {
-        visible: false,
-        message: '',
-        type: 'success'
-      }
+      toast: { visible: false, message: '', type: 'success' }
     };
   },
 
@@ -32,7 +35,6 @@ createApp({
     await this.loadTrackedMovies();
     await this.loadNotifications();
 
-    // Auto-refresh every 2 minutes
     setInterval(async () => {
       await this.loadTrackedMovies();
       await this.loadNotifications();
@@ -40,190 +42,175 @@ createApp({
   },
 
   methods: {
-    // Load cinemas from API
+    // ---- data loading ----
     async loadCinemas() {
       try {
-        const response = await fetch('/api/cinemas');
-        this.cinemas = await response.json();
-      } catch (error) {
-        console.error('Error loading cinemas:', error);
+        this.cinemas = await (await fetch('/api/cinemas')).json();
+      } catch (e) {
         this.showToast('Failed to load cinemas', 'error');
       }
     },
-
-    // Load tracked movies
     async loadTrackedMovies() {
       try {
-        const response = await fetch('/api/tracked');
-        this.trackedMovies = await response.json();
-      } catch (error) {
-        console.error('Error loading tracked movies:', error);
+        this.trackedMovies = await (await fetch('/api/tracked')).json();
+      } catch (e) {
+        /* ignore */
       }
     },
-
-    // Load notifications
     async loadNotifications() {
       try {
-        const response = await fetch('/api/notifications');
-        this.notifications = await response.json();
-      } catch (error) {
-        console.error('Error loading notifications:', error);
+        this.notifications = await (await fetch('/api/notifications')).json();
+      } catch (e) {
+        /* ignore */
       }
     },
 
-    // Track a new movie
-    async trackMovie() {
-      if (!this.form.movieName || !this.form.cinemaId) {
-        this.showToast('Please fill in all fields', 'error');
+    // ---- cinema selection ----
+    chooseAny() {
+      this.form.anyCinema = true;
+      this.form.selected = [];
+    },
+    toggleCinema(id) {
+      this.form.anyCinema = false;
+      const i = this.form.selected.indexOf(id);
+      if (i === -1) this.form.selected.push(id);
+      else this.form.selected.splice(i, 1);
+      if (this.form.selected.length === 0) this.form.anyCinema = true;
+    },
+    isSelected(id) {
+      return !this.form.anyCinema && this.form.selected.includes(id);
+    },
+    selectionValid() {
+      return this.form.anyCinema || this.form.selected.length > 0;
+    },
+    requestParams() {
+      return this.form.anyCinema
+        ? 'all=true'
+        : 'cinemas=' + this.form.selected.map(encodeURIComponent).join(',');
+    },
+
+    // ---- status helpers ----
+    statusMeta(status) {
+      return STATUS_META[status] || STATUS_META.unknown;
+    },
+    isAnyEntry(movie) {
+      return movie.cinemaId === 'all';
+    },
+
+    // ---- search ----
+    async searchNow() {
+      if (!this.form.movieName || !this.selectionValid()) {
+        this.showToast('Enter a film and pick a cinema', 'error');
         return;
       }
-
-      const cinema = this.cinemas.find(c => c.id === this.form.cinemaId);
-
+      this.search.visible = true;
+      this.search.loading = true;
+      this.search.data = null;
       try {
-        const response = await fetch('/api/track', {
+        const url = `/api/search?movie=${encodeURIComponent(this.form.movieName)}&${this.requestParams()}`;
+        this.search.data = await (await fetch(url)).json();
+      } catch (e) {
+        this.showToast('Search failed', 'error');
+      } finally {
+        this.search.loading = false;
+      }
+    },
+
+    // ---- track ----
+    async trackMovie(nameOverride) {
+      const movieName = nameOverride || this.form.movieName;
+      if (!movieName || !this.selectionValid()) {
+        this.showToast('Enter a film and pick a cinema', 'error');
+        return;
+      }
+      this.tracking = true;
+      try {
+        const body = this.form.anyCinema
+          ? { movieName, all: true }
+          : { movieName, cinemaIds: this.form.selected };
+        const res = await fetch('/api/track', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            movieName: this.form.movieName,
-            cinemaId: this.form.cinemaId,
-            cinemaName: cinema ? cinema.name : 'Unknown'
-          })
+          body: JSON.stringify(body)
         });
-
-        const data = await response.json();
-
+        const data = await res.json();
         if (data.success) {
-          this.showToast('Movie added to tracking!', 'success');
+          const n = (data.added || []).length;
+          this.showToast(`Tracking “${movieName}” at ${n} cinema${n > 1 ? 's' : ''}`, 'success');
           this.form.movieName = '';
-          this.form.cinemaId = '';
-          this.searchResults.visible = false;
+          this.search.visible = false;
           await this.loadTrackedMovies();
+          this.refreshSoon(); // background check may update status shortly
         } else {
-          this.showToast('Failed to track movie', 'error');
+          this.showToast(data.error || 'Failed to track', 'error');
         }
-      } catch (error) {
-        console.error('Error tracking movie:', error);
-        this.showToast('Failed to track movie', 'error');
+      } catch (e) {
+        this.showToast('Failed to track', 'error');
+      } finally {
+        this.tracking = false;
+      }
+    },
+    async trackFromSearch() {
+      if (this.search.data && this.search.data.film) {
+        await this.trackMovie(this.search.data.film.name);
       }
     },
 
-    // Search for a movie
-    async searchMovie() {
-      if (!this.form.movieName || !this.form.cinemaId) {
-        this.showToast('Please fill in all fields', 'error');
-        return;
-      }
-
-      this.searchResults.visible = true;
-      this.searchResults.loading = true;
-      this.searchResults.found = false;
-      this.searchResults.movies = [];
-      this.searchResults.error = null;
-      this.searchResults.availableMovies = [];
-
-      try {
-        const response = await fetch(
-          `/api/search?movie=${encodeURIComponent(this.form.movieName)}&cinema=${this.form.cinemaId}`
-        );
-        const data = await response.json();
-
-        this.searchResults.loading = false;
-        this.searchResults.found = data.found && data.movies.length > 0;
-        this.searchResults.movies = data.movies || [];
-        this.searchResults.error = data.error || null;
-        this.searchResults.availableMovies = data.availableMovies || [];
-
-        console.log('Search results:', data);
-      } catch (error) {
-        console.error('Error searching:', error);
-        this.searchResults.loading = false;
-        this.searchResults.error = 'Network error occurred';
-        this.showToast('Search failed', 'error');
-      }
-    },
-
-    // Check all movies now
-    async checkAllMovies() {
-      this.checking = true;
-
-      try {
-        const response = await fetch('/api/check', { method: 'POST' });
-        const data = await response.json();
-
-        if (data.success) {
-          this.showToast('Check completed!', 'success');
+    // Poll a few times after tracking to catch the background availability check
+    refreshSoon() {
+      [4000, 12000, 25000, 45000].forEach((ms) =>
+        setTimeout(async () => {
           await this.loadTrackedMovies();
           await this.loadNotifications();
-        } else {
-          this.showToast('Check failed', 'error');
+        }, ms)
+      );
+    },
+
+    async checkAllMovies() {
+      this.checking = true;
+      try {
+        const data = await (await fetch('/api/check', { method: 'POST' })).json();
+        if (data.success) {
+          this.showToast('Check completed', 'success');
+          await this.loadTrackedMovies();
+          await this.loadNotifications();
         }
-      } catch (error) {
-        console.error('Error checking:', error);
+      } catch (e) {
         this.showToast('Check failed', 'error');
       } finally {
         this.checking = false;
       }
     },
 
-    // Remove a tracked movie
     async removeMovie(id) {
-      if (!confirm('Are you sure you want to stop tracking this movie?')) {
-        return;
-      }
-
+      if (!confirm('Stop tracking this film?')) return;
       try {
-        const response = await fetch(`/api/track/${id}`, { method: 'DELETE' });
-        const data = await response.json();
-
-        if (data.success) {
-          this.showToast('Movie removed from tracking', 'success');
-          await this.loadTrackedMovies();
-        }
-      } catch (error) {
-        console.error('Error removing movie:', error);
-        this.showToast('Failed to remove movie', 'error');
+        await fetch(`/api/track/${id}`, { method: 'DELETE' });
+        this.showToast('Removed from watchlist', 'success');
+        await this.loadTrackedMovies();
+      } catch (e) {
+        this.showToast('Failed to remove', 'error');
       }
     },
 
-    // Clear all notifications
     async clearNotifications() {
       try {
-        const response = await fetch('/api/notifications', { method: 'DELETE' });
-        const data = await response.json();
-
-        if (data.success) {
-          this.showToast('Notifications cleared', 'success');
-          await this.loadNotifications();
-        }
-      } catch (error) {
-        console.error('Error clearing notifications:', error);
-        this.showToast('Failed to clear notifications', 'error');
+        await fetch('/api/notifications', { method: 'DELETE' });
+        await this.loadNotifications();
+      } catch (e) {
+        /* ignore */
       }
     },
 
-    // Show toast notification
+    // ---- misc ----
     showToast(message, type = 'success') {
-      this.toast.message = message;
-      this.toast.type = type;
-      this.toast.visible = true;
-
-      setTimeout(() => {
-        this.toast.visible = false;
-      }, 3000);
+      this.toast = { visible: true, message, type };
+      setTimeout(() => (this.toast.visible = false), 3000);
     },
-
-    // Format date
-    formatDate(dateString) {
-      if (!dateString) return '';
-      return new Date(dateString).toLocaleDateString();
-    },
-
-    // Format date and time
-    formatDateTime(dateString) {
-      if (!dateString) return '';
-      const date = new Date(dateString);
-      return `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+    formatDateTime(s) {
+      if (!s) return '';
+      const d = new Date(s);
+      return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
     }
   }
 }).mount('#app');

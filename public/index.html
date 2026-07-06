@@ -3,170 +3,224 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Odeon Dublin Movie Tracker</title>
+    <title>ODEON Watch — Dublin Movie Tracker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
     <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.prod.js"></script>
 </head>
 <body>
     <div id="app">
+        <div class="glow"></div>
+        <div class="grain"></div>
+
         <div class="container">
-            <header>
-                <h1>🎬 Odeon Dublin Movie Tracker</h1>
-                <p class="subtitle">Get notified when your favorite movies are available to book</p>
+            <header class="marquee">
+                <div class="bulbs">
+                    <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
+                    <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
+                    <span class="bulb"></span>
+                </div>
+                <p class="eyebrow">Dublin · Now Booking</p>
+                <h1>ODEON <span>Watch</span></h1>
+                <p class="subtitle">
+                    Track any film — even ones still in <em>Coming Soon</em> — and we'll shout the moment it's bookable.
+                </p>
+                <div class="bulbs bottom">
+                    <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
+                    <span class="bulb"></span><span class="bulb"></span><span class="bulb"></span>
+                    <span class="bulb"></span>
+                </div>
             </header>
 
-            <div v-if="notifications.length > 0" class="notifications-badge">
-                {{ notifications.length }} new notification{{ notifications.length > 1 ? 's' : '' }}
+            <div v-if="notifications.length > 0" class="alert-banner">
+                <span class="dot"></span>
+                {{ notifications.length }} film{{ notifications.length > 1 ? 's are' : ' is' }} ready to book
             </div>
 
-            <section class="card">
-                <h2>Track a New Movie</h2>
-                <form @submit.prevent="trackMovie">
-                    <div class="form-group">
-                        <label for="movieName">Movie Name</label>
+            <!-- Track / search -->
+            <section class="panel">
+                <div class="panel-head"><h2>Track a film</h2></div>
+
+                <form @submit.prevent="trackMovie()">
+                    <div class="field">
+                        <label for="movieName">Film title</label>
                         <input
                             type="text"
                             id="movieName"
                             v-model="form.movieName"
-                            placeholder="e.g., Dune: Part Two"
+                            placeholder="e.g. Masters of the Universe"
+                            autocomplete="off"
                             required>
                     </div>
 
-                    <div class="form-group">
-                        <label for="cinemaSelect">Select Cinema</label>
-                        <select id="cinemaSelect" v-model="form.cinemaId" required>
-                            <option value="">{{ cinemas.length === 0 ? 'Loading cinemas...' : 'Select a cinema' }}</option>
-                            <option v-for="cinema in cinemas" :key="cinema.id" :value="cinema.id">
-                                {{ cinema.name }}{{ cinema.address ? ' - ' + cinema.address : '' }}
-                            </option>
-                        </select>
+                    <div class="field">
+                        <label>Where?</label>
+                        <div class="cinema-select">
+                            <button type="button" class="pill pill-any" :class="{ on: form.anyCinema }" @click="chooseAny">
+                                <span class="tick">✦</span> Any ODEON Dublin cinema
+                            </button>
+                            <button
+                                v-for="cinema in cinemas"
+                                :key="cinema.id"
+                                type="button"
+                                class="pill"
+                                :class="{ on: isSelected(cinema.id) }"
+                                @click="toggleCinema(cinema.id)">
+                                <span class="tick">✓</span> {{ cinema.name.replace(/^ODEON\s*/i, '') }}
+                            </button>
+                        </div>
                     </div>
 
-                    <button type="submit" class="btn btn-primary">Start Tracking</button>
-                    <button type="button" class="btn btn-secondary" @click="searchMovie">Search Now</button>
+                    <div class="actions">
+                        <button type="submit" class="btn btn-primary" :disabled="tracking">
+                            {{ tracking ? 'Adding…' : 'Track this film' }}
+                        </button>
+                        <button type="button" class="btn btn-ghost" @click="searchNow">Check now</button>
+                    </div>
                 </form>
 
-                <div v-if="searchResults.visible" class="search-results">
-                    <h3 v-if="searchResults.found">Found {{ searchResults.movies.length }} result(s):</h3>
-                    <div v-if="searchResults.found">
-                        <div v-for="movie in searchResults.movies" :key="movie.id" class="search-result-item">
-                            <strong>{{ movie.name }}</strong><br>
-                            <span v-if="movie.showtimeCount !== undefined">
-                                {{ movie.showtimeCount }} showtime(s) available
-                            </span>
-                            <span v-else>
-                                {{ movie.showtimes }} showtime(s) available
-                            </span>
-                            <span v-if="movie.releaseDate"><br>Release date: {{ formatDate(movie.releaseDate) }}</span>
-                            <span v-if="movie.matchScore"><br><em>Match score: {{ (movie.matchScore * 100).toFixed(0) }}%</em></span>
-
-                            <!-- Show showtimes if available -->
-                            <div v-if="movie.showtimes && Array.isArray(movie.showtimes) && movie.showtimes.length > 0" class="showtimes-list">
-                                <strong>Available times:</strong>
-                                <div class="showtime-group">
-                                    <span v-for="(showtime, idx) in movie.showtimes.slice(0, 8)" :key="idx" class="showtime-badge">
-                                        {{ showtime.date }} @ {{ showtime.time }}
-                                        <span v-if="showtime.format && showtime.format !== 'Standard'" class="format-tag">{{ showtime.format }}</span>
-                                    </span>
-                                    <span v-if="movie.showtimes.length > 8" class="more-times">
-                                        +{{ movie.showtimes.length - 8 }} more
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
+                <!-- Search result (single film, status-first) -->
+                <div v-if="search.visible" class="results">
+                    <div v-if="search.loading" class="searching">
+                        <span class="spinner"></span> Looking up ODEON listings…
                     </div>
-                    <p v-else-if="searchResults.loading">Searching...</p>
-                    <div v-else>
-                        <p><strong>No exact match found.</strong></p>
-                        <p v-if="searchResults.error">{{ searchResults.error }}</p>
-                        <div v-if="searchResults.availableMovies && searchResults.availableMovies.length > 0">
-                            <p>Available movies at this cinema:</p>
-                            <ul style="margin-top: 10px;">
-                                <li v-for="(movie, index) in searchResults.availableMovies" :key="index">{{ movie }}</li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-            </section>
 
-            <section class="card">
-                <div class="section-header">
-                    <h2>Tracked Movies</h2>
-                    <button
-                        class="btn btn-secondary btn-sm"
-                        @click="checkAllMovies"
-                        :disabled="checking">
-                        {{ checking ? 'Checking...' : 'Check All Now' }}
-                    </button>
-                </div>
-                <div class="tracked-list">
-                    <p v-if="trackedMovies.length === 0" class="empty-state">
-                        No movies tracked yet. Add one above!
-                    </p>
-                    <div v-else>
-                        <div v-for="movie in trackedMovies" :key="movie.id" class="tracked-item">
-                            <div class="tracked-item-header">
-                                <div>
-                                    <div class="movie-name">{{ movie.movieName }}</div>
-                                    <div class="cinema-name">{{ movie.cinemaName }}</div>
-                                </div>
-                                <div>
-                                    <span class="status-badge" :class="'status-' + movie.status">
-                                        {{ movie.status.toUpperCase() }}
-                                    </span>
+                    <div v-else-if="search.data && search.data.notListed" class="empty">
+                        <span class="reel">🎞️</span>
+                        <p><strong>“{{ search.data.query }}” isn't on ODEON's listings.</strong></p>
+                        <p style="margin-top:6px">Check the spelling, or it may not be scheduled at ODEON Ireland yet.</p>
+                    </div>
+
+                    <div v-else-if="search.data" class="film-result">
+                        <div class="film-poster">
+                            <img v-if="search.data.film && search.data.film.posterUrl"
+                                 :src="search.data.film.posterUrl" :alt="search.data.film.name"
+                                 @error="search.data.film.posterUrl = null">
+                            <div v-else class="poster-fallback"><span class="reel">🎞️</span></div>
+                        </div>
+                        <div class="film-info">
+                            <span class="status" :class="statusMeta(search.data.status).cls">
+                                {{ statusMeta(search.data.status).label }}
+                            </span>
+                            <h3 class="film-name">{{ search.data.film ? search.data.film.name : search.data.query }}</h3>
+                            <div class="film-sub">
+                                <span v-if="search.data.film && search.data.film.certificate">{{ search.data.film.certificate }}</span>
+                                <span v-if="search.data.releaseDate"> · Released {{ search.data.releaseDate }}</span>
+                            </div>
+                            <p v-if="search.data.film && search.data.film.synopsis" class="film-synopsis">
+                                {{ search.data.film.synopsis }}
+                            </p>
+
+                            <!-- Showings -->
+                            <div v-if="search.data.showings.length" class="showings">
+                                <div v-for="s in search.data.showings" :key="s.cinemaId" class="showing-row">
+                                    <div class="showing-cinema">{{ s.cinemaName }}</div>
+                                    <div class="showtimes">
+                                        <span v-for="(t, i) in s.showtimes.slice(0, 8)" :key="i" class="chip">
+                                            {{ t.time }}
+                                            <span v-if="t.format && t.format !== 'Standard'" class="fmt">{{ t.format }}</span>
+                                        </span>
+                                        <span v-if="s.showtimes.length > 8" class="chip more">+{{ s.showtimes.length - 8 }}</span>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="movie-info">
-                                Added: {{ formatDateTime(movie.addedAt) }}
-                                <span v-if="movie.lastChecked"><br>Last checked: {{ formatDateTime(movie.lastChecked) }}</span>
-                                <span v-if="movie.foundAt"><br>Found at: {{ formatDateTime(movie.foundAt) }}</span>
-                            </div>
-                            <button
-                                class="btn btn-danger btn-sm"
-                                @click="removeMovie(movie.id)"
-                                style="margin-top: 10px;">
-                                Remove
+                            <p v-else-if="search.data.bookable" class="no-times">
+                                Bookable now, but no daily showtimes at your selected cinema{{ form.anyCinema ? 's' : '' }} yet — pre-book on ODEON.
+                            </p>
+                            <p v-else class="no-times">
+                                Not bookable yet. Track it and we'll alert you the moment it opens.
+                            </p>
+
+                            <button class="btn btn-primary btn-sm" style="margin-top:14px" @click="trackFromSearch">
+                                + Track this film
                             </button>
                         </div>
                     </div>
                 </div>
             </section>
 
-            <section class="card">
-                <div class="section-header">
-                    <h2>Notifications</h2>
-                    <button
-                        class="btn btn-secondary btn-sm"
-                        @click="clearNotifications"
-                        v-if="notifications.length > 0">
-                        Clear All
+            <!-- Watchlist -->
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Watchlist <span v-if="trackedMovies.length" class="count-chip">{{ trackedMovies.length }}</span></h2>
+                    <button class="btn btn-ghost btn-sm" @click="checkAllMovies" :disabled="checking">
+                        {{ checking ? 'Checking…' : 'Check all now' }}
                     </button>
                 </div>
-                <div class="notifications-list">
-                    <p v-if="notifications.length === 0" class="empty-state">No notifications yet.</p>
-                    <div v-else>
-                        <div v-for="notif in notifications" :key="notif.id" class="notification-item">
-                            <div class="notification-message">{{ notif.message }}</div>
-                            <div v-if="notif.details" class="notification-details">
-                                <span v-if="notif.details.showtimes">
-                                    {{ notif.details.showtimes }} showtime(s) available
-                                </span>
+
+                <div v-if="trackedMovies.length === 0" class="empty">
+                    <span class="reel">🎬</span>
+                    <p>Nothing tracked yet — add a film above (coming-soon titles welcome).</p>
+                </div>
+
+                <div v-else class="stack">
+                    <div v-for="movie in trackedMovies" :key="movie.id"
+                         class="ticket" :class="{ 'is-found': movie.status === 'found' }">
+                        <div v-if="movie.posterUrl" class="ticket-thumb">
+                            <img :src="movie.posterUrl" :alt="movie.movieName" @error="movie.posterUrl = null">
+                        </div>
+                        <div class="ticket-main">
+                            <div class="ticket-title">{{ movie.movieName }}</div>
+                            <div class="ticket-cinema">
+                                {{ isAnyEntry(movie) ? 'Any ODEON Dublin cinema' : movie.cinemaName }}
                             </div>
-                            <div class="notification-time">{{ formatDateTime(notif.createdAt) }}</div>
+                            <div v-if="movie.showings && movie.showings.length" class="ticket-showings">
+                                <div v-for="s in movie.showings" :key="s.cinemaId" class="showing-row compact">
+                                    <span class="showing-cinema">{{ s.cinemaName }}</span>
+                                    <span class="showtimes">
+                                        <span v-for="(t, i) in s.showtimes.slice(0, 5)" :key="i" class="chip">{{ t.time }}</span>
+                                        <span v-if="s.showtimes.length > 5" class="chip more">+{{ s.showtimes.length - 5 }}</span>
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="ticket-meta">
+                                <template v-if="movie.releaseDate">Release {{ movie.releaseDate }} · </template>
+                                Added {{ formatDateTime(movie.addedAt) }}
+                                <template v-if="movie.lastChecked"><br>Last checked {{ formatDateTime(movie.lastChecked) }}</template>
+                            </div>
+                        </div>
+                        <div class="ticket-side">
+                            <span class="status" :class="statusMeta(movie.filmStatus).cls">
+                                {{ statusMeta(movie.filmStatus).label }}
+                            </span>
+                            <button class="btn btn-danger btn-sm" @click="removeMovie(movie.id)">Remove</button>
                         </div>
                     </div>
                 </div>
             </section>
 
+            <!-- Alerts -->
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Alerts <span v-if="notifications.length" class="count-chip">{{ notifications.length }}</span></h2>
+                    <button v-if="notifications.length > 0" class="btn btn-ghost btn-sm" @click="clearNotifications">Clear all</button>
+                </div>
+
+                <div v-if="notifications.length === 0" class="empty">
+                    <span class="reel">🔔</span>
+                    <p>No alerts yet. We'll tell you the moment a tracked film becomes bookable.</p>
+                </div>
+
+                <div v-else class="stack">
+                    <div v-for="notif in notifications" :key="notif.id" class="note">
+                        <div class="note-msg">{{ notif.message }}</div>
+                        <div v-if="notif.details && notif.details.showings && notif.details.showings.length" class="note-detail">
+                            Showing at {{ notif.details.showings.map(s => s.cinemaName).join(', ') }}
+                        </div>
+                        <div class="note-time">{{ formatDateTime(notif.createdAt) }}</div>
+                    </div>
+                </div>
+            </section>
+
             <footer>
-                <p>The app checks for new movies every 30 minutes automatically.</p>
-                <p class="tech-note">Built with Node.js, Express, Vue.js and web scraping</p>
+                <p>Listings refresh automatically every 30 minutes.</p>
+                <p class="stamp">Node · Express · Vue · Firecrawl</p>
             </footer>
         </div>
 
-        <div :class="['toast', toast.type, { show: toast.visible }]">
-            {{ toast.message }}
-        </div>
+        <div :class="['toast', toast.type, { show: toast.visible }]">{{ toast.message }}</div>
     </div>
 
     <script src="app.js"></script>

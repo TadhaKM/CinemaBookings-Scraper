@@ -76,14 +76,24 @@ function getTrackedMovies() {
 function addMovie(movieName, cinemaId, cinemaName) {
   const movies = loadTrackedMovies();
 
+  // Don't track the same film at the same cinema twice.
+  const existing = movies.find(
+    (m) => m.movieName.toLowerCase() === movieName.toLowerCase() && m.cinemaId === cinemaId
+  );
+  if (existing) return existing;
+
   const newMovie = {
-    id: Date.now().toString(),
+    id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
     movieName: movieName,
     cinemaId: cinemaId,
     cinemaName: cinemaName || 'Unknown Cinema',
     addedAt: new Date().toISOString(),
     lastChecked: null,
-    status: 'tracking',
+    status: 'tracking', // 'tracking' | 'found'
+    filmStatus: 'unknown', // 'now-showing' | 'pre-book' | 'coming-soon' | 'not-listed'
+    releaseDate: null,
+    posterUrl: null,
+    showings: [],
     foundAt: null
   };
 
@@ -115,11 +125,16 @@ function getNotifications() {
 function addNotification(movieName, cinemaName, details) {
   const notifications = loadNotifications();
 
+  const statusVerb =
+    details.status === 'pre-book' ? 'is now available to pre-book' : 'is now showing';
+  const where =
+    cinemaName && cinemaName !== 'Any ODEON Dublin cinema' ? ` at ${cinemaName}` : ' at ODEON Dublin';
+
   const notification = {
     id: Date.now().toString(),
     movieName: movieName,
     cinemaName: cinemaName,
-    message: `${movieName} is now available at ${cinemaName}!`,
+    message: `${movieName} ${statusVerb}${where}!`,
     details: details,
     createdAt: new Date().toISOString(),
     read: false
@@ -150,34 +165,60 @@ async function checkTrackedMovies() {
 
   for (const movie of movies) {
     try {
-      console.log(`Checking: ${movie.movieName} at cinema ${movie.cinemaId}`);
+      const anyCinema = movie.cinemaId === 'all';
+      console.log(`Checking: ${movie.movieName} (${anyCinema ? 'any cinema' : movie.cinemaId})`);
 
-      const result = await odeonScraper.searchMovie(movie.movieName, movie.cinemaId);
+      const result = await odeonScraper.checkFilm(movie.movieName);
 
       movie.lastChecked = new Date().toISOString();
+      movie.filmStatus = result.status;
+      if (result.releaseDate) movie.releaseDate = result.releaseDate;
+      if (result.film && result.film.posterUrl) movie.posterUrl = result.film.posterUrl;
 
-      if (result.found && result.movies.length > 0) {
-        const foundMovie = result.movies[0];
+      // Decide whether it's bookable *for this tracking entry*.
+      let showings = [];
+      let bookableHere = false;
 
-        // If this is the first time we've found it, create a notification
+      if (result.bookable) {
+        if (anyCinema) {
+          bookableHere = true;
+          showings = await odeonScraper.getShowingsAllCinemas(movie.movieName);
+        } else {
+          const st = await odeonScraper.getShowtimesAtCinema(movie.movieName, movie.cinemaId);
+          if (st && st.showtimeCount > 0) {
+            showings = [
+              {
+                cinemaId: movie.cinemaId,
+                cinemaName: movie.cinemaName,
+                showtimes: st.showtimes,
+                showtimeCount: st.showtimeCount
+              }
+            ];
+            bookableHere = true;
+          } else if (result.status === 'pre-book') {
+            // Pre-book is site-wide; notify even before local daily listings exist.
+            bookableHere = true;
+          }
+        }
+      }
+
+      movie.showings = showings;
+
+      if (bookableHere) {
         if (movie.status !== 'found') {
           movie.status = 'found';
           movie.foundAt = new Date().toISOString();
-
-          addNotification(
-            movie.movieName,
-            movie.cinemaName,
-            {
-              showtimes: foundMovie.showtimes,
-              movieId: foundMovie.id,
-              releaseDate: foundMovie.releaseDate
-            }
-          );
+          addNotification(movie.movieName, movie.cinemaName, {
+            status: result.status,
+            releaseDate: result.releaseDate,
+            showings
+          });
         }
-
-        console.log(`✓ Found: ${movie.movieName} (${foundMovie.showtimes} showtimes)`);
+        console.log(`✓ Bookable: ${movie.movieName} [${result.status}] — ${showings.length} cinema(s) with times`);
       } else {
-        console.log(`✗ Not found: ${movie.movieName}`);
+        // Reset to tracking if it slipped back (rare) but keep found history.
+        if (movie.status !== 'found') movie.status = 'tracking';
+        console.log(`… Not bookable yet: ${movie.movieName} [${result.status}]`);
       }
     } catch (error) {
       console.error(`Error checking movie ${movie.movieName}:`, error.message);

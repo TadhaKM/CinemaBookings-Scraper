@@ -1,276 +1,121 @@
-const axios = require('axios');
-const cheerio = require('cheerio');
 const Fuse = require('fuse.js');
 const { getMockCinemas, getMockMovies } = require('./mock-data');
-const puppeteerScraper = require('./puppeteer-scraper');
+const firecrawl = require('./firecrawl-scraper');
 
-// Odeon Ireland API and website URLs
-const ODEON_WEBSITE = 'https://www.odeoncinemas.ie';
+// --- Caching ---------------------------------------------------------------
+// Cinemas rarely change; movie listings change through the day. We cache only
+// successful Firecrawl results (never the mock fallback) and dedupe concurrent
+// scrapes of the same target so "check all cinemas" doesn't fan out into
+// duplicate API calls.
 
-// Configuration: Use Puppeteer for real scraping or mock data
-const USE_PUPPETEER = process.env.USE_PUPPETEER === 'true';
+const CINEMAS_TTL = 6 * 60 * 60 * 1000; // 6 hours
+const MOVIES_TTL = 15 * 60 * 1000; // 15 minutes
+
+let cinemasCache = null; // { data, ts }
+let cinemasInflight = null; // Promise
+
+const moviesCache = new Map(); // cinemaId -> { data, ts }
+const moviesInflight = new Map(); // cinemaId -> Promise
 
 /**
- * Fetch all Odeon cinemas in Dublin
+ * Fetch all Odeon cinemas in Dublin (cached).
  */
 async function getCinemas() {
-  console.log('🎬 Fetching Odeon Dublin cinemas...');
-
-  // Try Puppeteer first if enabled
-  if (USE_PUPPETEER) {
-    console.log('Using Puppeteer for real scraping...');
-    try {
-      const cinemas = await puppeteerScraper.scrapeCinemas();
-      if (cinemas && cinemas.length > 0) {
-        return cinemas;
-      }
-    } catch (error) {
-      console.log('⚠ Puppeteer scraping failed, trying fallback methods...');
-    }
+  if (cinemasCache && Date.now() - cinemasCache.ts < CINEMAS_TTL) {
+    return cinemasCache.data;
   }
+  if (cinemasInflight) return cinemasInflight;
 
-  try {
-    // Try to fetch cinema data from various endpoints
-    const endpoints = [
-      `${ODEON_WEBSITE}/cinemas/`,
-      `${ODEON_WEBSITE}/api/cinemas`,
-      `${ODEON_WEBSITE}/cinemas.json`
-    ];
+  cinemasInflight = (async () => {
+    console.log('🎬 Fetching Odeon Dublin cinemas...');
 
-    for (const endpoint of endpoints) {
+    if (firecrawl.isConfigured()) {
       try {
-        console.log(`Trying endpoint: ${endpoint}`);
-        const response = await axios.get(endpoint, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Referer': 'https://www.odeoncinemas.ie/',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
-            'Cache-Control': 'max-age=0'
-          },
-          timeout: 15000
-        });
-
-        // Try JSON response first
-        if (response.headers['content-type']?.includes('application/json')) {
-          console.log('Got JSON response');
-          const data = response.data;
-          if (Array.isArray(data)) {
-            const dublinCinemas = data
-              .filter(c => c.name?.toLowerCase().includes('dublin'))
-              .map(c => ({
-                id: c.id || c.cinema_id || c.slug,
-                name: c.name,
-                address: c.address || c.location || ''
-              }));
-
-            if (dublinCinemas.length > 0) {
-              console.log(`✓ Found ${dublinCinemas.length} Dublin cinemas via JSON`);
-              return dublinCinemas;
-            }
-          }
+        const cinemas = await firecrawl.scrapeCinemas();
+        if (cinemas && cinemas.length > 0) {
+          cinemasCache = { data: cinemas, ts: Date.now() };
+          return cinemas;
         }
-
-        // Try HTML scraping
-        const $ = cheerio.load(response.data);
-        const cinemas = [];
-
-        // Try multiple selectors
-        const selectors = [
-          'article[data-cinema-id]',
-          '[data-cinema]',
-          '.cinema-item',
-          '.cinema-card',
-          'a[href*="/cinemas/"]'
-        ];
-
-        for (const selector of selectors) {
-          $(selector).each((i, elem) => {
-            const $elem = $(elem);
-            const id = $elem.attr('data-cinema-id') ||
-                      $elem.attr('data-cinema') ||
-                      $elem.attr('href')?.split('/').pop() ||
-                      $elem.attr('id');
-            const name = $elem.find('h2, h3, .cinema-name, .title').first().text().trim() ||
-                        $elem.text().trim();
-
-            if (id && name && name.toLowerCase().includes('dublin') && name.length < 100) {
-              cinemas.push({
-                id: id,
-                name: name,
-                address: $elem.find('.address, .location, .cinema-address').text().trim()
-              });
-            }
-          });
-
-          if (cinemas.length > 0) {
-            console.log(`✓ Found ${cinemas.length} cinemas using selector: ${selector}`);
-            return [...new Map(cinemas.map(c => [c.id, c])).values()]; // Remove duplicates
-          }
-        }
-      } catch (err) {
-        console.log(`Failed ${endpoint}:`, err.message);
-        continue;
+        console.log('⚠ Firecrawl returned no cinemas, falling back to mock data');
+      } catch (error) {
+        console.error('⚠ Firecrawl cinema scrape failed:', error.message);
       }
+    } else {
+      console.log('ℹ FIRECRAWL_API_KEY not set — using mock cinema data');
     }
-  } catch (error) {
-    console.log('⚠ All API/scraping attempts failed, using default cinemas');
-  }
 
-  // Return mock cinemas as fallback
-  return getMockCinemas();
+    return getMockCinemas();
+  })().finally(() => {
+    cinemasInflight = null;
+  });
+
+  return cinemasInflight;
 }
 
 /**
- * Fetch movies for a specific cinema
+ * Fetch movies (with showtimes) for a specific cinema (cached).
  */
 async function getMovies(cinemaId) {
-  console.log(`🎬 Fetching movies for cinema: ${cinemaId}`);
-
-  // Try Puppeteer first if enabled
-  if (USE_PUPPETEER) {
-    console.log('Using Puppeteer for real scraping...');
-    try {
-      const movies = await puppeteerScraper.scrapeMovies(cinemaId);
-      if (movies && movies.length > 0) {
-        return movies;
-      }
-    } catch (error) {
-      console.log('⚠ Puppeteer scraping failed, trying fallback methods...');
-    }
+  const cached = moviesCache.get(cinemaId);
+  if (cached && Date.now() - cached.ts < MOVIES_TTL) {
+    return cached.data;
   }
+  if (moviesInflight.has(cinemaId)) return moviesInflight.get(cinemaId);
 
-  try {
-    // Try multiple URL patterns for Odeon
-    const urls = [
-      `${ODEON_WEBSITE}/cinemas/${cinemaId}/whats-on`,
-      `${ODEON_WEBSITE}/cinemas/${cinemaId}`,
-      `${ODEON_WEBSITE}/${cinemaId}/films`,
-      `${ODEON_WEBSITE}/api/v1/cinemas/${cinemaId}/films`,
-      `${ODEON_WEBSITE}/films?cinema=${cinemaId}`
-    ];
+  const promise = (async () => {
+    console.log(`🎬 Fetching movies for cinema: ${cinemaId}`);
 
-    for (const url of urls) {
+    if (firecrawl.isConfigured()) {
       try {
-        console.log(`Trying URL: ${url}`);
-        const response = await axios.get(url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Referer': 'https://www.odeoncinemas.ie/',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
-            'Cache-Control': 'max-age=0'
-          },
-          timeout: 15000
-        });
-
-        console.log(`Response status: ${response.status}, Content-Type: ${response.headers['content-type']}`);
-
-        // Try JSON response
-        if (response.headers['content-type']?.includes('application/json')) {
-          const data = response.data;
-          console.log('Got JSON response');
-
-          let films = [];
-          if (Array.isArray(data)) {
-            films = data;
-          } else if (data.films) {
-            films = data.films;
-          } else if (data.data?.films) {
-            films = data.data.films;
-          }
-
-          if (films.length > 0) {
-            console.log(`✓ Found ${films.length} movies via JSON`);
-            return films.map(film => ({
-              id: film.id || film.film_id || film.slug,
-              name: film.title || film.name || film.film_name,
-              available: true,
-              showtimes: film.performances?.length || film.showtimes?.length || 0,
-              releaseDate: film.release_date || film.releaseDate || null
-            }));
-          }
+        const movies = await firecrawl.scrapeMovies(cinemaId);
+        if (movies && movies.length > 0) {
+          moviesCache.set(cinemaId, { data: movies, ts: Date.now() });
+          return movies;
         }
-
-        // Try HTML scraping
-        const $ = cheerio.load(response.data);
-        const movies = [];
-
-        // Enhanced selectors for movie items
-        const selectors = [
-          'article[data-film-id]',
-          '[data-film]',
-          '.film-item',
-          '.film-card',
-          '.movie-card',
-          'article.film',
-          'div[data-movie-id]',
-          'a[href*="/films/"]'
-        ];
-
-        for (const selector of selectors) {
-          $(selector).each((i, elem) => {
-            const $elem = $(elem);
-            const id = $elem.attr('data-film-id') ||
-                      $elem.attr('data-film') ||
-                      $elem.attr('data-movie-id') ||
-                      $elem.attr('href')?.split('/').pop() ||
-                      `film-${i}`;
-
-            const name = $elem.find('h2, h3, h4, .film-title, .film-name, .movie-title, .title').first().text().trim() ||
-                        $elem.attr('title') ||
-                        $elem.attr('aria-label');
-
-            if (name && name.length > 0 && name.length < 200) {
-              const showtimes = $elem.find('[data-session-id], .showtime, .session, .performance-time, button[data-performance]').length;
-
-              movies.push({
-                id: id,
-                name: name,
-                available: true,
-                showtimes: showtimes,
-                releaseDate: null
-              });
-            }
-          });
-
-          if (movies.length > 0) {
-            console.log(`✓ Found ${movies.length} movies using selector: ${selector}`);
-            // Remove duplicates based on name
-            const uniqueMovies = [...new Map(movies.map(m => [m.name.toLowerCase(), m])).values()];
-            console.log(`Movies found: ${uniqueMovies.map(m => m.name).join(', ')}`);
-            return uniqueMovies;
-          }
-        }
-
-        console.log(`No movies found with any selector at ${url}`);
-      } catch (err) {
-        console.log(`Failed ${url}:`, err.message);
-        continue;
+        console.log('⚠ Firecrawl returned no movies, falling back to mock data');
+      } catch (error) {
+        console.error('⚠ Firecrawl movie scrape failed:', error.message);
       }
+    } else {
+      console.log('ℹ FIRECRAWL_API_KEY not set — using mock movie data');
     }
-  } catch (error) {
-    console.error('⚠ All movie fetch attempts failed:', error.message);
-  }
 
-  // Return mock movies as fallback
-  return getMockMovies(cinemaId);
+    return getMockMovies(cinemaId);
+  })().finally(() => {
+    moviesInflight.delete(cinemaId);
+  });
+
+  moviesInflight.set(cinemaId, promise);
+  return promise;
 }
 
 /**
- * Search for a specific movie at a specific cinema using fuzzy matching
+ * Resolve a list of cinema ids from a request:
+ *   all=true          -> every Dublin cinema
+ *   ['a','b']         -> those ids
+ *   'a'               -> [ 'a' ]
+ * Returns an array of { id, name }.
+ */
+async function resolveCinemas({ all, cinemaIds, cinemaId } = {}) {
+  const list = await getCinemas();
+  const nameOf = (id) => list.find((c) => c.id === id)?.name || id;
+
+  let ids = [];
+  if (all) {
+    ids = list.map((c) => c.id);
+  } else if (Array.isArray(cinemaIds) && cinemaIds.length) {
+    ids = cinemaIds;
+  } else if (cinemaId) {
+    ids = [cinemaId];
+  }
+
+  // Deduplicate, preserve order
+  ids = [...new Set(ids)];
+  return ids.map((id) => ({ id, name: nameOf(id) }));
+}
+
+/**
+ * Search for a specific movie at a single cinema using fuzzy matching.
  */
 async function searchMovie(movieName, cinemaId) {
   console.log(`🔍 Searching for "${movieName}" at cinema ${cinemaId}`);
@@ -279,20 +124,16 @@ async function searchMovie(movieName, cinemaId) {
     const movies = await getMovies(cinemaId);
 
     if (movies.length === 0) {
-      console.log('⚠ No movies found at this cinema');
       return {
         found: false,
         movies: [],
-        error: 'No movies found at this cinema. The cinema may not have any current showings, or the scraper needs updating.'
+        error: 'No movies found at this cinema. It may have no current showings.'
       };
     }
 
-    console.log(`Searching through ${movies.length} movies for "${movieName}"`);
-
-    // Use Fuse.js for fuzzy matching (AI-like smart matching)
     const fuse = new Fuse(movies, {
       keys: ['name'],
-      threshold: 0.4, // 0 = perfect match, 1 = match anything
+      threshold: 0.4,
       includeScore: true,
       ignoreLocation: true,
       minMatchCharLength: 2
@@ -302,56 +143,268 @@ async function searchMovie(movieName, cinemaId) {
 
     if (results.length > 0) {
       const matches = results
-        .filter(result => result.score < 0.5) // Only good matches
-        .map(result => ({
-          ...result.item,
-          matchScore: result.score // Lower score = better match
-        }));
+        .filter((result) => result.score < 0.5)
+        .map((result) => ({ ...result.item, matchScore: result.score }));
 
-      console.log(`✓ Found ${matches.length} matches using fuzzy search`);
-      matches.forEach(m => console.log(`  - "${m.name}" (score: ${m.matchScore.toFixed(3)})`));
-
-      return {
-        found: matches.length > 0,
-        movies: matches,
-        cinemaId: cinemaId,
-        searchMethod: 'fuzzy-matching'
-      };
+      if (matches.length > 0) {
+        console.log(`✓ Found ${matches.length} fuzzy match(es) for "${movieName}" at ${cinemaId}`);
+        return { found: true, movies: matches, cinemaId, searchMethod: 'fuzzy-matching' };
+      }
     }
 
     // Fallback: simple substring matching
     const searchTerm = movieName.toLowerCase();
-    const matches = movies.filter(movie =>
-      movie.name.toLowerCase().includes(searchTerm) ||
-      searchTerm.includes(movie.name.toLowerCase())
+    const matches = movies.filter(
+      (movie) =>
+        movie.name.toLowerCase().includes(searchTerm) ||
+        searchTerm.includes(movie.name.toLowerCase())
     );
-
-    if (matches.length > 0) {
-      console.log(`✓ Found ${matches.length} matches using substring search`);
-    } else {
-      console.log(`✗ No matches found for "${movieName}"`);
-      console.log(`Available movies: ${movies.map(m => m.name).join(', ')}`);
-    }
 
     return {
       found: matches.length > 0,
       movies: matches,
-      cinemaId: cinemaId,
+      cinemaId,
       searchMethod: 'substring',
-      availableMovies: movies.map(m => m.name) // Include for debugging
+      availableMovies: movies.map((m) => m.name)
     };
   } catch (error) {
     console.error('⚠ Search failed:', error.message);
-    return {
-      found: false,
-      movies: [],
-      error: error.message
-    };
+    return { found: false, movies: [], error: error.message };
   }
+}
+
+/**
+ * Search a movie across several cinemas in parallel.
+ * Returns one grouped result per cinema.
+ */
+async function searchMovieMulti(movieName, cinemas) {
+  return Promise.all(
+    cinemas.map(async ({ id, name }) => {
+      const r = await searchMovie(movieName, id);
+      return {
+        cinemaId: id,
+        cinemaName: name,
+        found: r.found,
+        movies: r.movies || [],
+        error: r.error || null,
+        availableMovies: r.availableMovies || []
+      };
+    })
+  );
+}
+
+// --- Film-centric tracking (incl. coming-soon) -----------------------------
+
+const FILM_INDEX_TTL = 60 * 60 * 1000; // 1 hour
+let filmIndexCache = null; // { data, ts }
+let filmIndexInflight = null;
+
+/**
+ * ODEON's full film index (now showing + pre-book + coming soon), cached.
+ */
+async function getFilmIndex() {
+  if (filmIndexCache && Date.now() - filmIndexCache.ts < FILM_INDEX_TTL) {
+    return filmIndexCache.data;
+  }
+  if (filmIndexInflight) return filmIndexInflight;
+
+  filmIndexInflight = (async () => {
+    if (firecrawl.isConfigured()) {
+      try {
+        const films = await firecrawl.scrapeFilmIndex();
+        if (films && films.length > 0) {
+          filmIndexCache = { data: films, ts: Date.now() };
+          return films;
+        }
+      } catch (error) {
+        console.error('⚠ Firecrawl film index scrape failed:', error.message);
+      }
+    }
+    return [];
+  })().finally(() => {
+    filmIndexInflight = null;
+  });
+
+  return filmIndexInflight;
+}
+
+/**
+ * Find a film in the ODEON index by (fuzzy) title.
+ */
+async function findFilm(movieName) {
+  const index = await getFilmIndex();
+  if (!index.length) return null;
+
+  const fuse = new Fuse(index, {
+    keys: ['name'],
+    threshold: 0.4,
+    includeScore: true,
+    ignoreLocation: true,
+    minMatchCharLength: 2
+  });
+
+  const results = fuse.search(movieName);
+  if (results.length > 0 && results[0].score < 0.5) {
+    return results[0].item;
+  }
+
+  const term = movieName.toLowerCase();
+  return index.find((f) => f.name.toLowerCase().includes(term)) || null;
+}
+
+/**
+ * Normalise the film-page status label into a stable key.
+ */
+function normalizeStatus(raw) {
+  const s = String(raw || '').toLowerCase();
+  if (/now showing/.test(s)) return 'now-showing';
+  if (/pre.?book/.test(s)) return 'pre-book';
+  if (/coming soon/.test(s)) return 'coming-soon';
+  return 'coming-soon';
+}
+
+/**
+ * Get showtimes for a film at a single cinema (from that cinema's listings).
+ * Returns null if the film isn't currently listed there.
+ */
+async function getShowtimesAtCinema(movieName, cinemaId) {
+  const movies = await getMovies(cinemaId);
+  if (!movies.length) return null;
+
+  const fuse = new Fuse(movies, {
+    keys: ['name'],
+    threshold: 0.4,
+    ignoreLocation: true,
+    minMatchCharLength: 2
+  });
+  const results = fuse.search(movieName);
+  const match = results.length
+    ? results[0].item
+    : movies.find((m) => m.name.toLowerCase().includes(movieName.toLowerCase()));
+
+  if (!match) return null;
+  return {
+    matchedName: match.name,
+    showtimes: match.showtimes || [],
+    showtimeCount: match.showtimeCount ?? (match.showtimes || []).length
+  };
+}
+
+/**
+ * Find every cinema currently showing a film, with its showtimes.
+ */
+async function getShowingsAllCinemas(movieName) {
+  const cinemas = await getCinemas();
+  const results = await Promise.all(
+    cinemas.map(async (c) => {
+      const st = await getShowtimesAtCinema(movieName, c.id);
+      return st && st.showtimeCount > 0
+        ? { cinemaId: c.id, cinemaName: c.name, showtimes: st.showtimes, showtimeCount: st.showtimeCount }
+        : null;
+    })
+  );
+  return results.filter(Boolean);
+}
+
+/**
+ * Check a film's overall availability status from its ODEON page.
+ * Returns { found (bookable), bookable, status, releaseDate, film }.
+ */
+async function checkFilm(movieName) {
+  // Dev / no-key path: treat mock "now showing" films as bookable.
+  if (!firecrawl.isConfigured()) {
+    const cinemas = await getCinemas();
+    const r = await searchMovie(movieName, cinemas[0]?.id);
+    if (r.found && r.movies.length) {
+      const m = r.movies[0];
+      return {
+        found: true,
+        bookable: true,
+        status: 'now-showing',
+        releaseDate: m.releaseDate || null,
+        film: {
+          name: m.name,
+          url: null,
+          posterUrl: m.posterUrl || null,
+          certificate: m.certificate || null,
+          synopsis: m.synopsis || null
+        }
+      };
+    }
+    return { found: false, bookable: false, status: 'coming-soon', releaseDate: null, film: { name: movieName } };
+  }
+
+  const film = await findFilm(movieName);
+  if (!film) {
+    return { found: false, bookable: false, status: 'not-listed', releaseDate: null, film: null };
+  }
+
+  let details = {};
+  try {
+    details = await firecrawl.scrapeFilm(film.url);
+  } catch (error) {
+    console.error('⚠ Firecrawl film page scrape failed:', error.message);
+  }
+
+  const status = normalizeStatus(details.status);
+  const bookable = status === 'now-showing' || status === 'pre-book';
+
+  return {
+    found: bookable,
+    bookable,
+    status,
+    releaseDate: details.releaseDate || null,
+    film: {
+      name: film.name,
+      url: film.url,
+      posterUrl: details.posterUrl || film.posterUrl || null,
+      certificate: details.certificate || null,
+      synopsis: details.synopsis || null
+    }
+  };
+}
+
+/**
+ * Detailed, film-centric search used by the UI's "Search now":
+ * film status + release date + which of the requested cinemas have showtimes.
+ */
+async function checkFilmDetailed(movieName, targets = [], { all = false } = {}) {
+  const base = await checkFilm(movieName);
+  const out = {
+    query: movieName,
+    notListed: base.status === 'not-listed',
+    status: base.status,
+    bookable: base.bookable,
+    releaseDate: base.releaseDate,
+    film: base.film,
+    showings: []
+  };
+
+  if (base.bookable) {
+    const cinemas = all || targets.length === 0 ? await getCinemas() : targets;
+    const showings = await Promise.all(
+      cinemas.map(async (c) => {
+        const st = await getShowtimesAtCinema(movieName, c.id);
+        return st && st.showtimeCount > 0
+          ? { cinemaId: c.id, cinemaName: c.name, showtimes: st.showtimes, showtimeCount: st.showtimeCount }
+          : null;
+      })
+    );
+    out.showings = showings.filter(Boolean);
+  }
+
+  return out;
 }
 
 module.exports = {
   getCinemas,
   getMovies,
-  searchMovie
+  resolveCinemas,
+  searchMovie,
+  searchMovieMulti,
+  findFilm,
+  checkFilm,
+  checkFilmDetailed,
+  getShowtimesAtCinema,
+  getShowingsAllCinemas
 };

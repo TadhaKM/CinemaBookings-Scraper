@@ -1,5 +1,6 @@
+require('dotenv').config();
+
 const express = require('express');
-const path = require('path');
 const cron = require('node-cron');
 const odeonScraper = require('./scraper/odeon-scraper');
 const movieTracker = require('./services/movie-tracker');
@@ -36,34 +37,27 @@ app.get('/api/cinemas/:cinemaId/movies', async (req, res) => {
   }
 });
 
-// Search for a specific movie
+// Search for a film: returns its ODEON status (now showing / pre-book / coming
+// soon) plus which of the requested cinemas currently have showtimes.
+// Query: movie=<title>&cinemas=<id,id>|all=true
 app.get('/api/search', async (req, res) => {
   try {
-    const { movie, cinema } = req.query;
-    const results = await odeonScraper.searchMovie(movie, cinema);
-    res.json(results);
+    const { movie, cinemas, cinema, all } = req.query;
+    if (!movie) return res.status(400).json({ error: 'movie is required' });
+
+    const wantAll = all === 'true' || (cinemas ? String(cinemas).split(',').includes('all') : false);
+    const cinemaIds = cinemas
+      ? String(cinemas).split(',').filter((c) => c && c !== 'all')
+      : cinema
+        ? [cinema]
+        : [];
+
+    const targets = wantAll ? [] : await odeonScraper.resolveCinemas({ cinemaIds });
+    const result = await odeonScraper.checkFilmDetailed(movie, targets, { all: wantAll });
+    res.json(result);
   } catch (error) {
     console.error('Error searching movie:', error);
     res.status(500).json({ error: 'Failed to search movie' });
-  }
-});
-
-// Debug endpoint - get all movies at a cinema with full details
-app.get('/api/debug/cinema/:cinemaId', async (req, res) => {
-  try {
-    const { cinemaId } = req.params;
-    console.log(`\n========== DEBUG: Fetching movies for ${cinemaId} ==========`);
-    const movies = await odeonScraper.getMovies(cinemaId);
-    console.log(`========== DEBUG: Found ${movies.length} movies ==========\n`);
-    res.json({
-      cinemaId,
-      movieCount: movies.length,
-      movies: movies,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Debug error:', error);
-    res.status(500).json({ error: error.message, stack: error.stack });
   }
 });
 
@@ -78,28 +72,40 @@ app.get('/api/tracked', (req, res) => {
   }
 });
 
-// Add a movie to track
+// Add a film to track — at one or more cinemas, or "any" ODEON Dublin cinema.
+// Body: { movieName, all?: bool, cinemaIds?: string[], cinemaId?: string }
 app.post('/api/track', async (req, res) => {
   try {
-    const { movieName, cinemaId, cinemaName } = req.body;
-
-    if (!movieName || !cinemaId) {
-      return res.status(400).json({ error: 'Movie name and cinema ID are required' });
+    const { movieName, all, cinemaIds, cinemaId } = req.body;
+    if (!movieName) {
+      return res.status(400).json({ error: 'movieName is required' });
     }
 
-    const tracked = movieTracker.addMovie(movieName, cinemaId, cinemaName);
+    const wantAll =
+      all === true || (Array.isArray(cinemaIds) && cinemaIds.includes('all')) || cinemaId === 'all';
 
-    // Immediately check if the movie is available (don't wait 30 minutes)
-    console.log(`🔍 Immediately checking availability for: ${movieName} at ${cinemaName}`);
-    try {
-      await movieTracker.checkTrackedMovies();
-      console.log('✓ Initial check completed');
-    } catch (checkError) {
-      console.error('⚠ Initial check failed:', checkError.message);
-      // Don't fail the request if check fails, movie is still tracked
+    let entries;
+    if (wantAll) {
+      entries = [{ id: 'all', name: 'Any ODEON Dublin cinema' }];
+    } else {
+      entries = await odeonScraper.resolveCinemas({
+        cinemaIds: Array.isArray(cinemaIds) ? cinemaIds : cinemaId ? [cinemaId] : []
+      });
+      if (!entries.length) {
+        return res.status(400).json({ error: 'Select at least one cinema (or choose "any")' });
+      }
     }
 
-    res.json({ success: true, tracked });
+    const added = entries.map((e) => movieTracker.addMovie(movieName, e.id, e.name));
+
+    // Kick off an availability check in the background so the request returns fast.
+    console.log(`🔍 Tracking "${movieName}" at ${entries.map((e) => e.name).join(', ')}`);
+    movieTracker
+      .checkTrackedMovies()
+      .then(() => console.log('✓ Background check completed'))
+      .catch((err) => console.error('⚠ Background check failed:', err.message));
+
+    res.json({ success: true, added });
   } catch (error) {
     console.error('Error tracking movie:', error);
     res.status(500).json({ error: 'Failed to track movie' });
@@ -164,6 +170,11 @@ app.post('/api/check', async (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Odeon Dublin Movie Tracker running on http://localhost:${PORT}`);
-  console.log('Scheduled checks will run every 30 minutes');
+  console.log(`🎬 Odeon Dublin Movie Tracker running on http://localhost:${PORT}`);
+  console.log('⏰ Scheduled checks will run every 30 minutes');
+  if (process.env.FIRECRAWL_API_KEY) {
+    console.log('🔥 Firecrawl: enabled');
+  } else {
+    console.log('📦 Firecrawl: not configured — using mock data (set FIRECRAWL_API_KEY in .env)');
+  }
 });

@@ -1,153 +1,87 @@
-# Testing Guide for Odeon Dublin Movie Tracker
+# Testing Guide — ODEON Watch
 
-## Changes Made
+The scraper now uses **Firecrawl** structured extraction instead of Puppeteer/Cheerio,
+and fuzzy matching (Fuse.js) finds films even when you don't type the exact title.
 
-I've fixed the scraper and added AI-powered fuzzy matching to find movies even if you don't type the exact name.
-
-### New Features:
-1. **Fuzzy Matching** - Uses Fuse.js to find closest matches (e.g., "Tron" will find "Tron: Ares")
-2. **Better Logging** - Console shows exactly what's happening during searches
-3. **Multiple Scraping Methods** - Tries different URL patterns and selectors
-4. **Available Movies List** - When no match is found, shows all movies at that cinema
-5. **Debug Endpoint** - Special endpoint to see raw data
-
-## How to Test
-
-### Step 1: Install the New Package
+## 1. Install
 
 ```bash
 npm install
 ```
 
-This will install the new `fuse.js` package for fuzzy matching.
+## 2. Configure Firecrawl (optional but recommended)
 
-### Step 2: Start the Server
+```bash
+cp .env.example .env
+# edit .env → FIRECRAWL_API_KEY=fc-...
+```
+
+- **With a key**: live data is scraped from odeoncinemas.ie.
+- **Without a key**: the app runs on built-in **mock data** so you can test the UI offline.
+  The startup log tells you which mode you're in.
+
+## 3. Start the server
 
 ```bash
 npm start
 ```
 
-You should see logs like:
-```
-Odeon Dublin Movie Tracker running on http://localhost:3000
-```
-
-### Step 3: Test with Tron: Ares
-
-1. Open http://localhost:3000 in your browser
-2. In the "Movie Name" field, try:
-   - `Tron` (fuzzy match)
-   - `Tron Ares` (fuzzy match)
-   - `Tron: Ares` (exact match)
-3. Select any Odeon cinema
-4. Click "Search Now"
-
-### Step 4: Check the Console Logs
-
-In your terminal where the server is running, you should see detailed logs like:
+You should see:
 
 ```
-🎬 Fetching movies for cinema: point-square
-Trying URL: https://www.odeoncinemas.ie/cinemas/point-square/whats-on
-Response status: 200, Content-Type: text/html
-✓ Found 15 movies using selector: a[href*="/films/"]
-Movies found: Tron: Ares, Wicked, Nosferatu, ...
-🔍 Searching for "Tron" at cinema point-square
-✓ Found 1 matches using fuzzy search
-  - "Tron: Ares" (score: 0.167)
+🎬 Odeon Dublin Movie Tracker running on http://localhost:3000
+⏰ Scheduled checks will run every 30 minutes
+🔥 Firecrawl: enabled          # or "📦 Firecrawl: not configured — using mock data"
 ```
 
-### Step 5: Use the Debug Endpoint
+## 4. Try it in the browser
 
-To see exactly what movies the scraper finds:
+Open <http://localhost:3000>, then:
 
-Open in your browser:
+1. Type a film title — fuzzy matching means `Tron`, `Tron Ares`, and `Tron: Ares` all work.
+2. Choose a cinema.
+3. Click **Search now** to see poster cards with certificates and showtimes, or
+   **Track this film** to add it to the watchlist.
+
+## 5. Quick API smoke test
+
+```bash
+# List cinemas
+curl -s http://localhost:3000/api/cinemas
+
+# Search a film at a cinema
+curl -s "http://localhost:3000/api/search?movie=wicked&cinema=point-square"
+
+# Track a film (immediately runs a check)
+curl -s -X POST http://localhost:3000/api/track \
+  -H "Content-Type: application/json" \
+  -d '{"movieName":"Wicked","cinemaId":"point-square","cinemaName":"ODEON Point Square Dublin"}'
+
+# See notifications and tracked movies
+curl -s http://localhost:3000/api/notifications
+curl -s http://localhost:3000/api/tracked
 ```
-http://localhost:3000/api/debug/cinema/point-square
-```
-
-Replace `point-square` with:
-- `blanchardstown`
-- `coolock`
-- `stillorgan`
-
-This shows you ALL movies found at that cinema with full details.
-
-## What You Should See
-
-### If It Works:
-- Search results show "Found X result(s)"
-- Movie name appears with showtimes
-- Match score shows how close the match is (lower % = better match)
-
-### If It Doesn't Find the Movie:
-- Shows "No exact match found"
-- Lists all available movies at that cinema
-- Check the console logs to see what movies were found
 
 ## Troubleshooting
 
-### Problem: "No movies found at this cinema"
+**"Firecrawl: not configured" but I set a key**
+- Make sure the file is named `.env` (not `.env.example`) and lives in the project root.
+- Restart the server after editing `.env`.
 
-**Cause**: The scraper can't access or parse the Odeon website
+**Live scrape returns nothing / falls back to mock**
+- Check the terminal for `⚠ Firecrawl … failed` messages (HTTP status, timeout).
+- Confirm your Firecrawl key is valid and has quota at <https://www.firecrawl.dev/app>.
+- Odeon may have changed their page layout — adjust the schema/prompt in
+  `scraper/firecrawl-scraper.js`.
 
-**Solutions**:
-1. Check your internet connection
-2. Try the debug endpoint to see raw data
-3. Check terminal logs for error messages
-4. The Odeon website structure may have changed
+**A film isn't matched**
+- Check the "Currently showing here" list returned on a miss.
+- Loosen fuzzy matching by raising `threshold` (default `0.4`) in `scraper/odeon-scraper.js`.
 
-### Problem: Movies found but "Tron: Ares" not in the list
+## Fuzzy matching reference
 
-**Cause**: The movie might be showing under a different name or at a different cinema
+Fuse.js settings: `threshold: 0.4`, `ignoreLocation: true`, scores where `0.0` = perfect match.
 
-**Solution**:
-1. Check the "Available movies at this cinema" list
-2. Try a different Odeon cinema
-3. Visit odeoncinemas.ie directly to verify the movie is showing
-
-### Problem: Fuzzy matching not working
-
-**Cause**: The match threshold might be too strict
-
-**Solution**: In `scraper/odeon-scraper.js` line 252, increase the `threshold` value:
-```javascript
-threshold: 0.6, // Try 0.6 instead of 0.4 for looser matching
-```
-
-## How Fuzzy Matching Works
-
-The AI-powered fuzzy matching uses the Fuse.js library with these settings:
-
-- **Threshold 0.4**: Only matches that are 60% similar or better
-- **Includes score**: Shows how good the match is (0.0 = perfect, 0.5 = okay)
-- **Ignore location**: Doesn't care where in the string the match is
-
-### Examples:
-- `"Tron"` → Finds `"Tron: Ares"` (score ~0.17)
-- `"Wicked"` → Finds `"Wicked"` (score 0.0)
-- `"nosferatu"` → Finds `"Nosferatu"` (score 0.0)
-- `"dune 2"` → Finds `"Dune: Part Two"` (score ~0.3)
-
-## Next Steps
-
-Once you confirm the scraper is finding movies:
-
-1. Test tracking a movie
-2. Check if notifications work
-3. Let me know if you need to adjust the fuzzy matching threshold
-4. I can add more sophisticated AI matching if needed (OpenAI API, etc.)
-
-## Additional Debug Commands
-
-### Check if Node.js can make HTTPS requests:
-```bash
-node -e "require('axios').get('https://www.odeoncinemas.ie').then(r => console.log('OK:', r.status)).catch(e => console.log('Error:', e.message))"
-```
-
-### Check if Cheerio can parse HTML:
-```bash
-node -e "const cheerio = require('cheerio'); const $ = cheerio.load('<h1>Test</h1>'); console.log($('h1').text())"
-```
-
-Let me know what you see when you test!
+- `"Tron"` → `"Tron: Ares"`
+- `"dune 2"` → `"Dune: Part Two"`
+- `"nosferatu"` → `"Nosferatu"`

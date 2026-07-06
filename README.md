@@ -15,7 +15,7 @@ A web application that scrapes Odeon Cinema Dublin's website and notifies you wh
 ## Technology Stack
 
 - **Backend**: Node.js with Express
-- **Web Scraping**: Axios and Cheerio
+- **Web Scraping**: [Firecrawl](https://www.firecrawl.dev) structured extraction (LLM-based) — hands the target page a JSON schema and gets clean, structured movie/showtime data back, so it's resilient to markup changes
 - **Scheduling**: node-cron for periodic checks
 - **Frontend**: Vue.js 3 (via CDN), HTML5, CSS3
 - **Storage**: JSON file-based storage
@@ -25,7 +25,7 @@ A web application that scrapes Odeon Cinema Dublin's website and notifies you wh
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd claude
+cd CinemaBookings-Scraper
 ```
 
 2. Install dependencies:
@@ -33,7 +33,15 @@ cd claude
 npm install
 ```
 
-3. Start the server:
+3. Configure your Firecrawl API key:
+```bash
+cp .env.example .env
+# then edit .env and paste your key:
+# FIRECRAWL_API_KEY=fc-...
+```
+Get a key at <https://www.firecrawl.dev/app/api-keys>. **Without a key the app still runs**, using built-in mock data so you can develop the UI offline.
+
+4. Start the server:
 ```bash
 npm start
 ```
@@ -43,7 +51,7 @@ Or for development with auto-restart:
 npm run dev
 ```
 
-4. Open your browser and navigate to:
+5. Open your browser and navigate to:
 ```
 http://localhost:3000
 ```
@@ -54,7 +62,7 @@ http://localhost:3000
 
 1. Enter the movie name you want to track (e.g., "Dune: Part Two")
 2. Select the Odeon Dublin cinema location from the dropdown
-3. Click "Start Tracking" to add it to your tracked list
+3. Click "Track this film" to add it to your watchlist
 4. The app will automatically check every 30 minutes
 
 ### Searching Immediately
@@ -124,25 +132,28 @@ Manually triggers a check for all tracked movies.
 ## Project Structure
 
 ```
-claude/
-├── server.js                 # Main Express server
-├── package.json              # Dependencies
+CinemaBookings-Scraper/
+├── server.js                    # Main Express server
+├── package.json                 # Dependencies
+├── .env.example                 # Copy to .env and add your Firecrawl key
 ├── scraper/
-│   └── odeon-scraper.js      # Web scraping logic for Odeon
+│   ├── firecrawl-scraper.js     # Firecrawl v2 structured extraction (cinemas + movies)
+│   ├── odeon-scraper.js         # Orchestration: Firecrawl → mock fallback + fuzzy search
+│   └── mock-data.js             # Offline/dev sample data
 ├── services/
-│   └── movie-tracker.js      # Movie tracking and notification logic
+│   └── movie-tracker.js         # Movie tracking and notification logic
 ├── public/
-│   ├── index.html            # Main web interface (Vue.js)
-│   ├── styles.css            # Styling
-│   └── app.js                # Vue.js application
+│   ├── index.html               # Main web interface (Vue.js)
+│   ├── styles.css               # Styling
+│   └── app.js                   # Vue.js application
 └── data/
-    ├── tracked-movies.json   # Stored tracked movies
-    └── notifications.json    # Stored notifications
+    ├── tracked-movies.json      # Stored tracked movies
+    └── notifications.json       # Stored notifications
 ```
 
 ## How It Works
 
-1. **Scraping**: The app attempts to use Odeon's website structure to fetch movie data, trying multiple methods for reliability
+1. **Scraping**: Firecrawl loads the cinema page (rendering JavaScript) and an LLM extracts films + showtimes against a JSON schema. If Firecrawl isn't configured or a scrape fails, the app falls back to mock data
 2. **Tracking**: Movies are stored in a JSON file with their tracking status
 3. **Checking**: A cron job runs every 30 minutes to check all tracked movies
 4. **Notifications**: When a movie status changes from "not found" to "found", a notification is created
@@ -160,9 +171,10 @@ The frontend uses Vue.js 3 for:
 
 ## Configuration
 
+- **Firecrawl API key**: Set `FIRECRAWL_API_KEY` in `.env` (required for live scraping)
 - **Check Interval**: Modify the cron schedule in `server.js` (default: `*/30 * * * *` = every 30 minutes)
 - **Port**: Set the `PORT` environment variable (default: 3000)
-- **Cinemas**: Update default cinemas in `scraper/odeon-scraper.js` if needed
+- **Mock/fallback cinemas & movies**: Edit `scraper/mock-data.js`
 
 ## Notes
 
