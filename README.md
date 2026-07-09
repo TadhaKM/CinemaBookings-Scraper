@@ -10,6 +10,7 @@ A web application that scrapes Odeon Cinema Dublin's website and notifies you wh
 - **Manual release dates**: If a film isn't in the schedule, enter its release date yourself and choose how many days before to start looking
 - **One, several, or all cinemas**: Track a film at a specific Dublin ODEON, a few of them, or "any" cinema
 - **Real-time Notifications**: Get notified when a tracked film becomes bookable (with showtimes where available)
+- **Email / phone push / SMS alerts**: Fires once, the moment a film becomes bookable — via SMTP email, [ntfy.sh](https://ntfy.sh) phone push (free, no account), and/or Twilio SMS. Each channel is independent and a failing one never breaks the check loop
 - **Manual Search**: Look up a film's status and showtimes immediately
 - **Clean Web Interface**: Modern Vue.js interface with poster art and status badges
 - **Persistent Storage**: Tracked films and notifications are saved locally
@@ -88,6 +89,42 @@ If you want to check right away instead of waiting:
 - Notifications show the movie name, cinema, and number of showtimes
 - Click "Clear All" to remove all notifications
 
+## Notifications
+
+Credentials go in `.env`; recipients and on/off toggles are set in the app's **Notifications** panel
+(stored in `data/settings.json`). A channel only fires when it's **both** configured in `.env` **and**
+enabled with a valid recipient. Use **Send test** to verify before relying on it.
+
+Each film alerts **once**, on the `tracking → found` transition — you won't get repeats every hour.
+
+### Phone push — ntfy.sh (easiest, free)
+No account, no API key.
+1. Install the **ntfy** app ([iOS](https://apps.apple.com/app/ntfy/id1625396347) / [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy)).
+2. Subscribe to a **secret, unguessable topic name** (e.g. `odeon-a7f3k9q2`).
+3. Put the same topic in the Notifications panel and save.
+
+> Anyone who knows the topic can read your alerts. Treat it like a password. Self-host `NTFY_SERVER` if you'd rather.
+
+### Email — SMTP
+Works with any SMTP server. For Gmail, create an [App Password](https://myaccount.google.com/apppasswords)
+(requires 2FA) — **not** your normal password.
+```bash
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false        # true for port 465
+SMTP_USER=you@gmail.com
+SMTP_PASS=your-app-password
+SMTP_FROM=you@gmail.com  # optional, defaults to SMTP_USER
+```
+
+### SMS — Twilio (costs per message)
+```bash
+TWILIO_ACCOUNT_SID=ACxxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxxx
+TWILIO_FROM=+15551234567
+```
+Enter your number in full international format (`+353871234567`). Leave the vars blank to disable SMS.
+
 ## Dublin Odeon Cinemas Supported
 
 The cinema list is scraped live from ODEON's site. The five Dublin-area cinemas are:
@@ -129,8 +166,11 @@ Release date is auto-resolved from the-numbers.com; `releaseDate` overrides it a
 }
 ```
 
+### POST /api/notify/test
+Sends a test alert through every active channel. Returns `{ sent: [...], failed: [{channel, error}] }`.
+
 ### GET /api/settings
-Returns the current check-schedule settings (`leadDays`, `unknownIntervalHours`, `tiers`) plus `defaults` and the scheduler `tickMinutes`.
+Returns the check-schedule settings (`leadDays`, `unknownIntervalHours`, `tiers`), the `notifications` block (recipients + toggles), `defaults`, `tickMinutes`, and a `channels` map showing which channels have credentials configured. **Never returns credentials.**
 
 ### PUT /api/settings
 Updates the cadence. Values are validated and clamped server-side; tracked films' next-check times are recomputed immediately.
@@ -180,6 +220,7 @@ CinemaBookings-Scraper/
 │   ├── movie-tracker.js         # Tracking, notifications, release-aware scheduling
 │   ├── release-schedule.js      # the-numbers.com schedule scrape + cache + lookup
 │   ├── settings.js              # Configurable cadence tiers + lead window
+│   ├── notifier.js              # Email (SMTP) / push (ntfy) / SMS (Twilio) dispatch
 │   └── json-store.js            # Atomic JSON reads/writes (no silent data loss)
 ├── public/
 │   ├── index.html               # Main web interface (Vue.js)

@@ -287,6 +287,83 @@
                 </div>
             </section>
 
+            <!-- Notifications -->
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Notifications</h2>
+                    <button class="btn btn-ghost btn-sm" @click="sendTest" :disabled="testing || !anyChannelActive()">
+                        {{ testing ? 'Sending…' : 'Send test' }}
+                    </button>
+                </div>
+
+                <p class="sched-note" style="margin:0 0 18px">
+                    We'll alert you once, the moment a tracked film becomes bookable.
+                    Credentials live in <code>.env</code>; recipients are set here.
+                </p>
+
+                <div class="channels">
+                    <!-- Email -->
+                    <div class="channel" :class="{ off: !channels.email.configured }">
+                        <div class="channel-head">
+                            <label class="switch">
+                                <input type="checkbox" v-model="settings.notifications.email.enabled"
+                                       :disabled="!channels.email.configured">
+                                <span>Email</span>
+                            </label>
+                            <span class="chan-state" :class="channels.email.configured ? 'ok' : 'warn'">
+                                {{ channels.email.configured ? 'SMTP configured' : 'set SMTP_* in .env' }}
+                            </span>
+                        </div>
+                        <input type="email" v-model="settings.notifications.email.to"
+                               placeholder="you@example.com" :disabled="!channels.email.configured">
+                    </div>
+
+                    <!-- Push -->
+                    <div class="channel">
+                        <div class="channel-head">
+                            <label class="switch">
+                                <input type="checkbox" v-model="settings.notifications.push.enabled">
+                                <span>Phone push</span>
+                            </label>
+                            <span class="chan-state ok">ntfy.sh · no account needed</span>
+                        </div>
+                        <input type="text" v-model="settings.notifications.push.topic"
+                               placeholder="secret-topic-name" autocomplete="off">
+                        <p class="chan-hint">
+                            Install the <strong>ntfy</strong> app, subscribe to this exact topic.
+                            Anyone who knows it can read your alerts — make it unguessable.
+                        </p>
+                    </div>
+
+                    <!-- SMS -->
+                    <div class="channel" :class="{ off: !channels.sms.configured }">
+                        <div class="channel-head">
+                            <label class="switch">
+                                <input type="checkbox" v-model="settings.notifications.sms.enabled"
+                                       :disabled="!channels.sms.configured">
+                                <span>SMS</span>
+                            </label>
+                            <span class="chan-state" :class="channels.sms.configured ? 'ok' : 'warn'">
+                                {{ channels.sms.configured ? 'Twilio configured' : 'set TWILIO_* in .env' }}
+                            </span>
+                        </div>
+                        <input type="tel" v-model="settings.notifications.sms.to"
+                               placeholder="+353871234567" :disabled="!channels.sms.configured">
+                        <p class="chan-hint">Costs per message. Use full international format.</p>
+                    </div>
+                </div>
+
+                <div class="actions" style="margin-top:18px">
+                    <button type="button" class="btn btn-primary btn-sm" @click="saveSettings" :disabled="settingsSaving">
+                        {{ settingsSaving ? 'Saving…' : 'Save notifications' }}
+                    </button>
+                </div>
+
+                <div v-if="testResult" class="test-result" :class="testResult.ok ? 'ok' : 'warn'">
+                    {{ testResult.message }}
+                </div>
+            </section>
+
             <!-- Alerts -->
             <section class="panel">
                 <div class="panel-head">

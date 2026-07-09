@@ -500,6 +500,85 @@ input[type='date'] {
   line-height: 1.5;
 }
 
+/* --- Notification channels ------------------------------------ */
+
+.channels { display: flex; flex-direction: column; gap: 14px; }
+
+.channel {
+  background: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 15px 16px;
+}
+
+.channel.off { opacity: 0.6; }
+
+.channel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 11px;
+  flex-wrap: wrap;
+}
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.switch input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
+.switch input:disabled { cursor: not-allowed; }
+
+.chan-state {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.chan-state.ok { color: var(--green); background: rgba(143, 194, 106, 0.12); }
+.chan-state.warn { color: var(--gold-bright); background: var(--gold-dim); }
+
+.chan-hint {
+  margin-top: 9px;
+  font-size: 0.78rem;
+  color: var(--faint);
+  line-height: 1.5;
+}
+
+.test-result {
+  margin-top: 16px;
+  padding: 12px 15px;
+  border-radius: var(--radius-sm);
+  font-size: 0.87rem;
+}
+
+.test-result.ok { color: var(--green); background: rgba(143, 194, 106, 0.1); border: 1px solid rgba(143, 194, 106, 0.35); }
+.test-result.warn { color: var(--gold-bright); background: var(--gold-dim); border: 1px solid rgba(242, 180, 60, 0.35); }
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--ink);
+  border: 1px solid var(--line-strong);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--gold);
+}
+
 /* --- Watchlist release + cadence ------------------------------ */
 
 .ticket-release {

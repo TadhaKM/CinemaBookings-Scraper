@@ -24,9 +24,26 @@ createApp({
         leadDays: 10 // start checking this many days before release
       },
       detect: { loading: false, checked: false, found: false, date: null, title: null },
-      settings: { leadDays: 10, unknownIntervalHours: 3, tiers: [], tickMinutes: 10 },
+      settings: {
+        leadDays: 10,
+        unknownIntervalHours: 3,
+        tiers: [],
+        tickMinutes: 10,
+        notifications: {
+          email: { enabled: false, to: '' },
+          push: { enabled: false, topic: '' },
+          sms: { enabled: false, to: '' }
+        }
+      },
+      channels: {
+        email: { configured: false },
+        push: { configured: true },
+        sms: { configured: false }
+      },
       settingsOpen: false,
       settingsSaving: false,
+      testing: false,
+      testResult: null,
       search: {
         visible: false,
         loading: false,
@@ -100,10 +117,49 @@ createApp({
     async loadSettings() {
       try {
         const s = await (await fetch('/api/settings')).json();
-        this.settings = s;
+        if (s.channels) this.channels = s.channels;
+        this.settings = { ...this.settings, ...s };
         this.form.leadDays = s.leadDays;
       } catch (e) {
         /* keep defaults */
+      }
+    },
+
+    anyChannelActive() {
+      const n = this.settings.notifications || {};
+      return Boolean(
+        (this.channels.email.configured && n.email?.enabled && n.email?.to) ||
+          (n.push?.enabled && n.push?.topic) ||
+          (this.channels.sms.configured && n.sms?.enabled && n.sms?.to)
+      );
+    },
+
+    async sendTest() {
+      this.testing = true;
+      this.testResult = null;
+      try {
+        const r = await (await fetch('/api/notify/test', { method: 'POST' })).json();
+        const sent = r.sent || [];
+        const failed = r.failed || [];
+        if (sent.length && !failed.length) {
+          this.testResult = { ok: true, message: `Test sent via ${sent.join(', ')} — check your device.` };
+        } else if (sent.length) {
+          this.testResult = {
+            ok: false,
+            message: `Sent via ${sent.join(', ')}. Failed: ${failed.map((f) => `${f.channel} (${f.error})`).join('; ')}`
+          };
+        } else if (failed.length) {
+          this.testResult = {
+            ok: false,
+            message: `All channels failed: ${failed.map((f) => `${f.channel} (${f.error})`).join('; ')}`
+          };
+        } else {
+          this.testResult = { ok: false, message: 'No active channels — enable one and save first.' };
+        }
+      } catch (e) {
+        this.testResult = { ok: false, message: 'Test request failed.' };
+      } finally {
+        this.testing = false;
       }
     },
     async saveSettings() {
@@ -118,13 +174,15 @@ createApp({
             tiers: this.settings.tiers.map((t) => ({
               withinDays: Number(t.withinDays),
               everyHours: Number(t.everyHours)
-            }))
+            })),
+            notifications: this.settings.notifications
           })
         });
         const data = await res.json();
         if (data.success) {
           this.settings = { ...this.settings, ...data.settings };
-          this.showToast('Check schedule saved', 'success');
+          if (data.channels) this.channels = data.channels;
+          this.showToast('Settings saved', 'success');
           await this.loadTrackedMovies(); // nextCheckAt recomputed server-side
         } else {
           this.showToast(data.error || 'Failed to save', 'error');

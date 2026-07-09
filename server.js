@@ -6,6 +6,7 @@ const odeonScraper = require('./scraper/odeon-scraper');
 const movieTracker = require('./services/movie-tracker');
 const releaseSchedule = require('./services/release-schedule');
 const settings = require('./services/settings');
+const notifier = require('./services/notifier');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -144,13 +145,30 @@ app.post('/api/track', async (req, res) => {
 
 // --- Check-schedule settings ------------------------------------------------
 
-// Current cadence settings (lead window, tiers, unknown-date interval).
+// Current cadence settings (lead window, tiers, unknown-date interval) plus
+// which notification channels are configured. Contains no credentials.
 app.get('/api/settings', (req, res) => {
   try {
-    res.json({ ...settings.get(), defaults: settings.DEFAULTS, tickMinutes: settings.MIN_INTERVAL_MINUTES });
+    res.json({
+      ...settings.get(),
+      defaults: settings.DEFAULTS,
+      tickMinutes: settings.MIN_INTERVAL_MINUTES,
+      channels: notifier.status()
+    });
   } catch (error) {
     console.error('Error getting settings:', error);
     res.status(500).json({ error: 'Failed to get settings' });
+  }
+});
+
+// Send a test notification through every active channel.
+app.post('/api/notify/test', async (req, res) => {
+  try {
+    const result = await notifier.sendTest();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error sending test notification:', error);
+    res.status(500).json({ error: 'Failed to send test notification' });
   }
 });
 
@@ -165,7 +183,7 @@ app.put('/api/settings', (req, res) => {
       `⚙ Settings updated: lead ${saved.leadDays}d, tiers ` +
         saved.tiers.map((t) => `≤${t.withinDays}d→${t.everyHours}h`).join(', ')
     );
-    res.json({ success: true, settings: saved });
+    res.json({ success: true, settings: saved, channels: notifier.status() });
   } catch (error) {
     console.error('Error saving settings:', error);
     res.status(500).json({ error: 'Failed to save settings' });
@@ -279,6 +297,9 @@ app.listen(PORT, () => {
   } else {
     console.log('📦 Firecrawl: not configured — using mock data (set FIRECRAWL_API_KEY in .env)');
   }
+
+  const active = notifier.activeChannels();
+  console.log(active.length ? `📨 Notifications: ${active.join(', ')}` : '📨 Notifications: none active');
 
   // Warm the release-schedule cache on startup (non-blocking).
   releaseSchedule

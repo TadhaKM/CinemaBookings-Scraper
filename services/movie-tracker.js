@@ -3,6 +3,7 @@ const path = require('path');
 const odeonScraper = require('../scraper/odeon-scraper');
 const settings = require('./settings');
 const store = require('./json-store');
+const notifier = require('./notifier');
 
 const DATA_DIR = path.join(__dirname, '../data');
 const TRACKED_FILE = path.join(DATA_DIR, 'tracked-movies.json');
@@ -127,6 +128,12 @@ function addNotification(movieName, cinemaName, details) {
   saveNotifications(notifications);
 
   console.log(`🎬 NOTIFICATION: ${notification.message}`);
+
+  // Fan out to email / push / SMS. Fire-and-forget: an outbound failure must
+  // never break the availability check loop (notifier already swallows errors).
+  notifier
+    .send(notification)
+    .catch((err) => console.error('⚠ Notification dispatch failed:', err.message));
 
   return notification;
 }
@@ -253,7 +260,9 @@ async function checkMovie(movie) {
         addNotification(movie.movieName, movie.cinemaName, {
           status: result.status,
           releaseDate: movie.releaseDate,
-          showings
+          showings,
+          filmUrl: result.film?.url || null,
+          posterUrl: result.film?.posterUrl || null
         });
       }
       console.log(`✓ Bookable: ${movie.movieName} [${result.status}] — ${showings.length} cinema(s) with times`);
@@ -269,13 +278,28 @@ async function checkMovie(movie) {
 }
 
 /**
+ * Persist the results of a check run without clobbering concurrent edits.
+ *
+ * A check can take minutes (scraping). If the user adds or removes a film in
+ * that window, blind-writing the array we loaded at the start would resurrect
+ * deleted films and drop newly added ones. So we re-read the current list and
+ * merge our updates in by id, touching only films that still exist.
+ */
+function mergeCheckedMovies(checked) {
+  const byId = new Map(checked.map((m) => [m.id, m]));
+  const current = loadTrackedMovies();
+  const merged = current.map((m) => (byId.has(m.id) ? { ...m, ...byId.get(m.id) } : m));
+  saveTrackedMovies(merged);
+}
+
+/**
  * Check every tracked movie now (used by the "Check all now" button).
  */
 async function checkTrackedMovies() {
   const movies = loadTrackedMovies();
   console.log(`Checking all ${movies.length} tracked movies...`);
   for (const movie of movies) await checkMovie(movie);
-  saveTrackedMovies(movies);
+  mergeCheckedMovies(movies);
   console.log('Check completed!');
 }
 
@@ -289,7 +313,7 @@ async function checkDueMovies() {
   if (!due.length) return;
   console.log(`⏰ ${due.length} movie(s) due for a check`);
   for (const movie of due) await checkMovie(movie);
-  saveTrackedMovies(movies);
+  mergeCheckedMovies(due);
 }
 
 module.exports = {

@@ -31,7 +31,13 @@ const DEFAULTS = {
     { withinDays: 5, everyHours: 1 },
     { withinDays: 7, everyHours: 2 },
     { withinDays: 10, everyHours: 3 }
-  ]
+  ],
+  // Recipients + toggles only. Credentials live in .env, never here.
+  notifications: {
+    email: { enabled: false, to: '' },
+    push: { enabled: false, topic: '' }, // ntfy.sh topic
+    sms: { enabled: false, to: '' }
+  }
 };
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -73,7 +79,29 @@ function sanitize(input = {}) {
 
   if (!tiers.length) tiers = [...DEFAULTS.tiers];
 
-  return { leadDays, unknownIntervalHours, tiers };
+  return { leadDays, unknownIntervalHours, tiers, notifications: sanitizeNotifications(input.notifications) };
+}
+
+function str(v, max = 200) {
+  return typeof v === 'string' ? v.trim().slice(0, max) : '';
+}
+
+function sanitizeNotifications(input = {}) {
+  const d = DEFAULTS.notifications;
+  const email = { ...d.email, ...(input.email || {}) };
+  const push = { ...d.push, ...(input.push || {}) };
+  const sms = { ...d.sms, ...(input.sms || {}) };
+
+  const to = str(email.to);
+  const topic = str(push.topic, 80).replace(/[^\w-]/g, ''); // ntfy topics are [\w-]
+  const phone = str(sms.to, 32).replace(/[^\d+]/g, '');
+
+  return {
+    // A channel can't be "enabled" without a valid-looking recipient.
+    email: { enabled: Boolean(email.enabled) && /.+@.+\..+/.test(to), to },
+    push: { enabled: Boolean(push.enabled) && topic.length > 0, topic },
+    sms: { enabled: Boolean(sms.enabled) && /^\+\d{7,15}$/.test(phone), to: phone }
+  };
 }
 
 function load() {
