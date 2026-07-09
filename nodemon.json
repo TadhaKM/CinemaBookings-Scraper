@@ -1,5 +1,5 @@
 {
-  "watch": ["server.js", "scraper", "services"],
+  "watch": ["server.js", "scraper", "services", "middleware"],
   "ext": "js,json",
   "ignore": ["data/*", "public/*", "*.test.js"]
 }

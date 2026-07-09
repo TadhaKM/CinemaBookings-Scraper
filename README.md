@@ -89,6 +89,66 @@ If you want to check right away instead of waiting:
 - Notifications show the movie name, cinema, and number of showtimes
 - Click "Clear All" to remove all notifications
 
+## Deployment (Railway)
+
+This app needs an **always-on process** (in-process cron every 10 min) and a
+**persistent disk** (`data/` holds your watchlist, settings and schedule cache).
+That rules out serverless hosts (Vercel/Netlify/Cloudflare Workers) and any free
+tier that sleeps on idle — a sleeping app never checks, so it never alerts you.
+
+### Steps
+
+1. **Push to GitHub**, then on [Railway](https://railway.app): *New Project → Deploy from GitHub repo*.
+   It auto-detects the `Dockerfile` via `railway.json`.
+
+2. **Add a Volume** (Service → Settings → Volumes) mounted at:
+   ```
+   /app/data
+   ```
+   > ⚠️ Skip this and your watchlist, settings and alerts are wiped on every redeploy.
+
+3. **Set Variables** (Service → Variables):
+
+   | Variable | Required | Notes |
+   |---|---|---|
+   | `FIRECRAWL_API_KEY` | yes | Otherwise it runs on mock data |
+   | `APP_USER` / `APP_PASS` | **yes** | HTTP basic auth — see warning below |
+   | `TZ` | recommended | `Europe/Dublin` (already set in the Dockerfile) |
+   | `SMTP_HOST` `SMTP_PORT` `SMTP_SECURE` `SMTP_USER` `SMTP_PASS` `SMTP_FROM` | optional | Email alerts |
+   | `TWILIO_ACCOUNT_SID` `TWILIO_AUTH_TOKEN` `TWILIO_FROM` | optional | SMS alerts |
+
+   Don't set `PORT` — Railway injects it.
+   Notification **recipients** (email address, ntfy topic) are *not* env vars — set
+   them in the app's Notifications panel; they persist on the volume.
+
+4. **Keep replicas at 1.** Two instances would double-scrape, send duplicate
+   alerts, and race each other on the JSON files.
+
+5. Open the generated URL and log in with `APP_USER` / `APP_PASS`.
+
+### 🔒 Set APP_USER and APP_PASS
+
+Without them **every endpoint is public**: `GET /api/settings` exposes your ntfy
+topic (letting anyone read your alerts *and* push fake ones to your phone),
+`POST /api/notify/test` can spam you, and `DELETE /api/track/:id` wipes your
+watchlist. Auth is skipped when the vars are unset (so local dev is frictionless)
+and the server logs a loud warning if that happens in production.
+
+`GET /api/health` stays unauthenticated for Railway's health check.
+
+### Running the container anywhere else
+
+```bash
+docker build -t odeon-watch .
+docker run -d --name odeon-watch \
+  -p 3000:3000 \
+  -v odeon-data:/app/data \
+  -e FIRECRAWL_API_KEY=fc-... \
+  -e APP_USER=you -e APP_PASS=something-long \
+  -e TZ=Europe/Dublin \
+  odeon-watch
+```
+
 ## Notifications
 
 Credentials go in `.env`; recipients and on/off toggles are set in the app's **Notifications** panel

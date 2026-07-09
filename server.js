@@ -7,13 +7,24 @@ const movieTracker = require('./services/movie-tracker');
 const releaseSchedule = require('./services/release-schedule');
 const settings = require('./services/settings');
 const notifier = require('./services/notifier');
+const basicAuth = require('./middleware/basic-auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(express.json());
+
+// Auth must come BEFORE express.static, otherwise the UI (and app.js) is served
+// to anyone. /api/health stays open so platform health checks don't need creds.
+app.use(basicAuth({ user: process.env.APP_USER, pass: process.env.APP_PASS, exempt: ['/api/health'] }));
+
 app.use(express.static('public'));
+
+// Liveness probe (unauthenticated).
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, uptime: Math.round(process.uptime()) });
+});
 
 // API Routes
 

@@ -1,0 +1,17 @@
+# Never bake secrets or local state into the image
+.env
+data/
+
+node_modules/
+npm-debug.log*
+*.log
+
+.git/
+.gitignore
+.github/
+
+# Docs / dev-only
+README.md
+TESTING.md
+nodemon.json
+.env.example
