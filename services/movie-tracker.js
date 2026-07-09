@@ -293,27 +293,57 @@ function mergeCheckedMovies(checked) {
 }
 
 /**
- * Check every tracked movie now (used by the "Check all now" button).
+ * Checks are expensive (each bookable film scrapes every cinema for showtimes),
+ * so runs are serialized: the cron tick, the post-track check and the manual
+ * "Check all" can all fire at once, and we must not scrape in parallel or pile
+ * up. Chaining (rather than dropping) means nothing is silently skipped.
+ */
+let checkChain = Promise.resolve();
+function serialize(fn) {
+  checkChain = checkChain.then(fn, fn);
+  return checkChain;
+}
+
+/**
+ * Check every tracked movie that hasn't been found yet.
+ *
+ * Films already marked `found` are skipped: their alert has fired, so
+ * re-checking them only burns 5 cinema scrapes per run for no new information.
  */
 async function checkTrackedMovies() {
-  const movies = loadTrackedMovies();
-  console.log(`Checking all ${movies.length} tracked movies...`);
-  for (const movie of movies) await checkMovie(movie);
-  mergeCheckedMovies(movies);
-  console.log('Check completed!');
+  return serialize(async () => {
+    const all = loadTrackedMovies();
+    const movies = all.filter((m) => m.status !== 'found');
+    const skipped = all.length - movies.length;
+
+    if (!movies.length) {
+      console.log(`Nothing to check (${skipped} already found).`);
+      return;
+    }
+
+    console.log(
+      `Checking ${movies.length} tracked movie(s)${skipped ? ` — skipping ${skipped} already found` : ''}...`
+    );
+    for (const movie of movies) await checkMovie(movie);
+    mergeCheckedMovies(movies);
+    console.log('Check completed!');
+  });
 }
 
 /**
  * Scheduler tick: only check movies that are due per their release-aware cadence.
+ * (isDue() already excludes films that have been found.)
  */
 async function checkDueMovies() {
-  const movies = loadTrackedMovies();
-  const now = Date.now();
-  const due = movies.filter((m) => isDue(m, now));
-  if (!due.length) return;
-  console.log(`⏰ ${due.length} movie(s) due for a check`);
-  for (const movie of due) await checkMovie(movie);
-  mergeCheckedMovies(due);
+  return serialize(async () => {
+    const movies = loadTrackedMovies();
+    const now = Date.now();
+    const due = movies.filter((m) => isDue(m, now));
+    if (!due.length) return;
+    console.log(`⏰ ${due.length} movie(s) due for a check`);
+    for (const movie of due) await checkMovie(movie);
+    mergeCheckedMovies(due);
+  });
 }
 
 module.exports = {

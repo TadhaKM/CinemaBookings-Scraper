@@ -104,7 +104,9 @@
                         <button type="submit" class="btn btn-primary" :disabled="tracking">
                             {{ tracking ? 'Adding…' : 'Track this film' }}
                         </button>
-                        <button type="button" class="btn btn-ghost" @click="searchNow">Check now</button>
+                        <button type="button" class="btn btn-ghost" @click="searchNow" :disabled="search.loading">
+                            {{ search.loading ? 'Checking…' : 'Check now' }}
+                        </button>
                     </div>
                 </form>
 
@@ -160,8 +162,9 @@
                                 Not bookable yet. Track it and we'll alert you the moment it opens.
                             </p>
 
-                            <button class="btn btn-primary btn-sm" style="margin-top:14px" @click="trackFromSearch">
-                                + Track this film
+                            <button class="btn btn-primary btn-sm" style="margin-top:14px"
+                                    @click="trackFromSearch" :disabled="tracking">
+                                {{ tracking ? 'Adding…' : '+ Track this film' }}
                             </button>
                         </div>
                     </div>
@@ -250,7 +253,7 @@
                             </div>
                         </div>
                         <div class="timing-col narrow">
-                            <label for="setUnknown">No release date</label>
+                            <label for="setUnknown">Default interval <span class="muted">(fallback)</span></label>
                             <div class="lead-input">
                                 <input type="number" id="setUnknown" v-model.number="settings.unknownIntervalHours"
                                        min="0.25" max="168" step="0.25">
@@ -259,7 +262,11 @@
                         </div>
                     </div>
 
-                    <label class="tiers-label">Intervals</label>
+                    <label class="tiers-label">Intervals <span class="muted">(optional — remove all for a flat cadence)</span></label>
+                    <p v-if="!settings.tiers.length" class="chan-hint" style="margin:0 0 12px">
+                        No intervals set. Every film inside its lead window is checked every
+                        <strong>{{ fmtHours(settings.unknownIntervalHours) }}</strong> — no ramping up near release.
+                    </p>
                     <div class="tier-rows">
                         <div v-for="(tier, i) in settings.tiers" :key="i" class="tier-row">
                             <span class="tier-lead">Within</span>

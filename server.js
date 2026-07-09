@@ -277,11 +277,17 @@ cron.schedule('15 4 * * *', async () => {
 });
 
 // Manual check endpoint
+// Kick off a check and return immediately. A full check scrapes every cinema
+// and can take minutes — holding the HTTP connection open that long stalls the
+// browser (which allows only ~6 concurrent connections per origin).
 app.post('/api/check', async (req, res) => {
   try {
     console.log('Running manual movie check...');
-    await movieTracker.checkTrackedMovies();
-    res.json({ success: true, message: 'Check completed' });
+    movieTracker
+      .checkTrackedMovies()
+      .then(() => console.log('✓ Manual check completed'))
+      .catch((err) => console.error('⚠ Manual check failed:', err.message));
+    res.status(202).json({ success: true, started: true, message: 'Check started' });
   } catch (error) {
     console.error('Error in manual check:', error);
     res.status(500).json({ error: 'Failed to check movies' });

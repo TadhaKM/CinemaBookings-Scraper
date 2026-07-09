@@ -66,6 +66,25 @@ createApp({
   },
 
   methods: {
+    /**
+     * fetch + JSON with a hard timeout. Without this, a request that never
+     * settles leaves `loading`/`tracking`/`checking` stuck true and the UI's
+     * buttons disabled forever.
+     */
+    async fetchJson(url, options = {}, timeoutMs = 90000) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, { ...options, signal: controller.signal });
+        return await res.json();
+      } catch (err) {
+        if (err.name === 'AbortError') throw new Error('Timed out — the scrape took too long.');
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+
     // ---- data loading ----
     async loadCinemas() {
       try {
@@ -135,10 +154,11 @@ createApp({
     },
 
     async sendTest() {
+      if (this.testing) return;
       this.testing = true;
       this.testResult = null;
       try {
-        const r = await (await fetch('/api/notify/test', { method: 'POST' })).json();
+        const r = await this.fetchJson('/api/notify/test', { method: 'POST' }, 30000);
         const sent = r.sent || [];
         const failed = r.failed || [];
         if (sent.length && !failed.length) {
@@ -224,11 +244,24 @@ createApp({
     // Plain-English summary of the resulting schedule.
     scheduleSummary() {
       const tiers = this.sortedTiers();
-      if (!tiers.length) return [];
       const lead = Number(this.settings.leadDays);
       const rows = [];
 
       rows.push({ range: `More than ${lead} days before release`, every: 'not checked yet', dim: true });
+
+      // No tiers = flat cadence, no ramping.
+      if (!tiers.length) {
+        rows.push({
+          range: `${lead} days or fewer (incl. after release)`,
+          every: `every ${this.fmtHours(this.settings.unknownIntervalHours)}`
+        });
+        rows.push({
+          range: 'No known release date',
+          every: `every ${this.fmtHours(this.settings.unknownIntervalHours)}`,
+          dim: true
+        });
+        return rows;
+      }
 
       const maxWithin = tiers[tiers.length - 1].withinDays;
       if (lead > maxWithin) {
@@ -241,12 +274,25 @@ createApp({
       for (let i = tiers.length - 1; i >= 0; i--) {
         const upper = tiers[i].withinDays;
         const lower = i === 0 ? null : tiers[i - 1].withinDays + 1;
+
+        // A tier whose whole range sits beyond the lead window can never fire.
+        if (lower !== null && lower > lead) {
+          rows.push({
+            range: `${upper}–${lower} days before`,
+            every: `never — outside your ${lead}-day lead window`,
+            dim: true
+          });
+          continue;
+        }
+
+        // Clamp the top of the range to the lead window so it reads truthfully.
+        const effUpper = Math.min(upper, lead);
         const range =
           lower === null
-            ? `${upper} days or fewer (incl. after release)`
-            : upper === lower
-              ? `${upper} days before`
-              : `${upper}–${lower} days before`;
+            ? `${effUpper} days or fewer (incl. after release)`
+            : effUpper === lower
+              ? `${effUpper} days before`
+              : `${effUpper}–${lower} days before`;
         rows.push({ range, every: `every ${this.fmtHours(tiers[i].everyHours)}` });
       }
 
@@ -271,7 +317,7 @@ createApp({
     async lookupRelease(name) {
       this.detect.loading = true;
       try {
-        const hit = await (await fetch(`/api/release-schedule/lookup?title=${encodeURIComponent(name)}`)).json();
+        const hit = await this.fetchJson(`/api/release-schedule/lookup?title=${encodeURIComponent(name)}`, {}, 10000);
         if (hit && hit.date) {
           this.detect = { loading: false, checked: true, found: true, date: hit.date, title: hit.title };
         } else {
@@ -314,7 +360,7 @@ createApp({
         return `Checks begin in ${start} day${start === 1 ? '' : 's'}`;
       }
       const tiers = this.sortedTiers();
-      if (!tiers.length) return 'Checking';
+      if (!tiers.length) return `Checking every ${this.fmtHours(this.settings.unknownIntervalHours)}`;
       const tier = tiers.find((t) => d <= t.withinDays) || tiers[tiers.length - 1];
       return `Checking every ${this.fmtHours(tier.everyHours)}`;
     },
@@ -330,6 +376,10 @@ createApp({
 
     // ---- search ----
     async searchNow() {
+      // A search for a bookable film scrapes every cinema and can take a while.
+      // Re-entry would stack multi-minute requests and exhaust the browser's
+      // per-origin connection pool, freezing the whole page.
+      if (this.search.loading) return;
       if (!this.form.movieName || !this.selectionValid()) {
         this.showToast('Enter a film and pick a cinema', 'error');
         return;
@@ -339,9 +389,10 @@ createApp({
       this.search.data = null;
       try {
         const url = `/api/search?movie=${encodeURIComponent(this.form.movieName)}&${this.requestParams()}`;
-        this.search.data = await (await fetch(url)).json();
+        this.search.data = await this.fetchJson(url);
       } catch (e) {
-        this.showToast('Search failed', 'error');
+        this.search.visible = false;
+        this.showToast(e.message || 'Search failed', 'error');
       } finally {
         this.search.loading = false;
       }
@@ -361,12 +412,11 @@ createApp({
           : { movieName, cinemaIds: this.form.selected };
         if (this.form.releaseDate) body.releaseDate = this.form.releaseDate;
         if (Number.isFinite(Number(this.form.leadDays))) body.leadDays = Number(this.form.leadDays);
-        const res = await fetch('/api/track', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
-        const data = await res.json();
+        const data = await this.fetchJson(
+          '/api/track',
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+          30000
+        );
         if (data.success) {
           const n = (data.added || []).length;
           this.showToast(`Tracking “${movieName}” at ${n} cinema${n > 1 ? 's' : ''}`, 'success');
@@ -401,17 +451,21 @@ createApp({
       );
     },
 
+    // The server now runs the check in the background and returns 202 straight
+    // away, so we never hold a connection open for minutes.
     async checkAllMovies() {
+      if (this.checking) return;
       this.checking = true;
       try {
-        const data = await (await fetch('/api/check', { method: 'POST' })).json();
+        const data = await this.fetchJson('/api/check', { method: 'POST' }, 15000);
         if (data.success) {
-          this.showToast('Check completed', 'success');
-          await this.loadTrackedMovies();
-          await this.loadNotifications();
+          this.showToast('Check started — results will appear shortly', 'success');
+          this.refreshSoon();
+        } else {
+          this.showToast(data.error || 'Check failed', 'error');
         }
       } catch (e) {
-        this.showToast('Check failed', 'error');
+        this.showToast(e.message || 'Check failed', 'error');
       } finally {
         this.checking = false;
       }

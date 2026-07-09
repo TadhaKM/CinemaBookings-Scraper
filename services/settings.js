@@ -77,7 +77,9 @@ function sanitize(input = {}) {
   for (const t of tiers) byDay.set(t.withinDays, t);
   tiers = [...byDay.values()].sort((a, b) => a.withinDays - b.withinDays);
 
-  if (!tiers.length) tiers = [...DEFAULTS.tiers];
+  // An empty tier list is legal: it means "no ramping" — everything inside the
+  // lead window is checked at `unknownIntervalHours`. We must NOT silently
+  // restore the defaults here, or deleting every interval appears to do nothing.
 
   return { leadDays, unknownIntervalHours, tiers, notifications: sanitizeNotifications(input.notifications) };
 }
@@ -128,6 +130,9 @@ function save(input) {
  * Minutes between checks for a film `d` days from release.
  * Returns null when the film is outside its lead window (don't check yet).
  *
+ * With no tiers configured, every in-window film is checked at the default
+ * interval (`unknownIntervalHours`) — a flat cadence with no ramping.
+ *
  * @param {number|null} d          days until release (null = unknown)
  * @param {object} overrides       { leadDays?, tiers? } per-film overrides
  */
@@ -137,10 +142,11 @@ function intervalMinutesFor(d, overrides = {}) {
   const tiers =
     Array.isArray(overrides.tiers) && overrides.tiers.length ? sanitize({ tiers: overrides.tiers }).tiers : s.tiers;
 
-  if (d === null || d === undefined) {
-    return Math.max(MIN_INTERVAL_MINUTES, Math.round(s.unknownIntervalHours * 60));
-  }
+  const fallback = Math.max(MIN_INTERVAL_MINUTES, Math.round(s.unknownIntervalHours * 60));
+
+  if (d === null || d === undefined) return fallback; // unknown release date
   if (d > leadDays) return null; // window not open yet
+  if (!tiers.length) return fallback; // no ramping configured
 
   const tier = tiers.find((t) => d <= t.withinDays) || tiers[tiers.length - 1];
   return Math.max(MIN_INTERVAL_MINUTES, Math.round(tier.everyHours * 60));
