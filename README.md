@@ -101,11 +101,18 @@ tier that sleeps on idle — a sleeping app never checks, so it never alerts you
 1. **Push to GitHub**, then on [Railway](https://railway.app): *New Project → Deploy from GitHub repo*.
    It auto-detects the `Dockerfile` via `railway.json`.
 
-2. **Add a Volume** (Service → Settings → Volumes) mounted at:
-   ```
-   /app/data
-   ```
+2. **Add a Volume** (Service → Settings → Volumes):
+
+   | Field | Value |
+   |---|---|
+   | Name | `odeon-data` |
+   | Mount path | `/app/data` |
+   | Size | `1024` MB — the app uses well under 1 MB |
+
    > ⚠️ Skip this and your watchlist, settings and alerts are wiped on every redeploy.
+
+   The volume mounts root-owned, so `entrypoint.sh` chowns it and then drops from
+   root to the `node` user before starting the app.
 
 3. **Set Variables** (Service → Variables):
 

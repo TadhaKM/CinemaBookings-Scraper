@@ -1,0 +1,7 @@
+# Shell scripts and the Dockerfile MUST keep LF line endings. With CRLF the
+# container fails at startup with:
+#   /app/entrypoint.sh: /bin/sh^M: bad interpreter: No such file or directory
+# This matters because core.autocrlf=true on Windows would otherwise rewrite them.
+*.sh text eol=lf
+entrypoint.sh text eol=lf
+Dockerfile text eol=lf
