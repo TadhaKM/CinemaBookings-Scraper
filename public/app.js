@@ -19,8 +19,11 @@ createApp({
       form: {
         movieName: '',
         anyCinema: true, // "any ODEON Dublin cinema"
-        selected: [] // specific cinema ids
+        selected: [], // specific cinema ids
+        releaseDate: '', // manual override (YYYY-MM-DD)
+        leadDays: 10 // start checking this many days before release
       },
+      detect: { loading: false, checked: false, found: false, date: null, title: null },
       search: {
         visible: false,
         loading: false,
@@ -89,12 +92,72 @@ createApp({
         : 'cinemas=' + this.form.selected.map(encodeURIComponent).join(',');
     },
 
-    // ---- status helpers ----
+    // ---- release-date detection ----
+    onNameInput() {
+      clearTimeout(this._detectTimer);
+      const name = this.form.movieName.trim();
+      if (name.length < 2) {
+        this.detect = { loading: false, checked: false, found: false, date: null, title: null };
+        return;
+      }
+      this._detectTimer = setTimeout(() => this.lookupRelease(name), 450);
+    },
+    async lookupRelease(name) {
+      this.detect.loading = true;
+      try {
+        const hit = await (await fetch(`/api/release-schedule/lookup?title=${encodeURIComponent(name)}`)).json();
+        if (hit && hit.date) {
+          this.detect = { loading: false, checked: true, found: true, date: hit.date, title: hit.title };
+        } else {
+          this.detect = { loading: false, checked: true, found: false, date: null, title: null };
+        }
+      } catch (e) {
+        this.detect = { loading: false, checked: true, found: false, date: null, title: null };
+      }
+    },
+
+    // ---- status + scheduling helpers ----
     statusMeta(status) {
       return STATUS_META[status] || STATUS_META.unknown;
     },
     isAnyEntry(movie) {
       return movie.cinemaId === 'all';
+    },
+    daysUntil(dateStr) {
+      if (!dateStr) return null;
+      const rel = new Date(`${dateStr}T00:00:00`);
+      if (isNaN(rel)) return null;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return Math.ceil((rel - today) / 86400000);
+    },
+    fmtDate(dateStr) {
+      if (!dateStr) return '';
+      const d = new Date(`${dateStr}T00:00:00`);
+      return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    },
+    // Human label for how often a tracked film is being checked.
+    cadenceLabel(movie) {
+      if (movie.status === 'found') return 'Bookable';
+      const lead = Number.isFinite(movie.leadDays) ? movie.leadDays : 10;
+      const d = this.daysUntil(movie.releaseDate);
+      if (d === null) return 'Checking every 3h';
+      if (d > lead) {
+        const start = d - lead;
+        return `Checks begin in ${start} day${start === 1 ? '' : 's'}`;
+      }
+      if (d <= 5) return 'Checking every 1h';
+      if (d <= 7) return 'Checking every 2h';
+      return 'Checking every 3h';
+    },
+    releaseLabel(movie) {
+      if (!movie.releaseDate) return null;
+      const d = this.daysUntil(movie.releaseDate);
+      const rel = this.fmtDate(movie.releaseDate);
+      if (d === null) return `Releases ${rel}`;
+      if (d < 0) return `Released ${rel}`;
+      if (d === 0) return `Releases today (${rel})`;
+      return `Releases ${rel} · ${d} day${d === 1 ? '' : 's'}`;
     },
 
     // ---- search ----
@@ -128,6 +191,8 @@ createApp({
         const body = this.form.anyCinema
           ? { movieName, all: true }
           : { movieName, cinemaIds: this.form.selected };
+        if (this.form.releaseDate) body.releaseDate = this.form.releaseDate;
+        if (Number.isFinite(Number(this.form.leadDays))) body.leadDays = Number(this.form.leadDays);
         const res = await fetch('/api/track', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -138,6 +203,8 @@ createApp({
           const n = (data.added || []).length;
           this.showToast(`Tracking “${movieName}” at ${n} cinema${n > 1 ? 's' : ''}`, 'success');
           this.form.movieName = '';
+          this.form.releaseDate = '';
+          this.detect = { loading: false, checked: false, found: false, date: null, title: null };
           this.search.visible = false;
           await this.loadTrackedMovies();
           this.refreshSoon(); // background check may update status shortly

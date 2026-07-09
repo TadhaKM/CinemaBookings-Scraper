@@ -4,6 +4,7 @@ const express = require('express');
 const cron = require('node-cron');
 const odeonScraper = require('./scraper/odeon-scraper');
 const movieTracker = require('./services/movie-tracker');
+const releaseSchedule = require('./services/release-schedule');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -73,10 +74,14 @@ app.get('/api/tracked', (req, res) => {
 });
 
 // Add a film to track — at one or more cinemas, or "any" ODEON Dublin cinema.
-// Body: { movieName, all?: bool, cinemaIds?: string[], cinemaId?: string }
+// Body: {
+//   movieName, all?, cinemaIds?, cinemaId?,
+//   releaseDate?: 'YYYY-MM-DD' (manual override),
+//   leadDays?: number (start checking this many days before release, default 10)
+// }
 app.post('/api/track', async (req, res) => {
   try {
-    const { movieName, all, cinemaIds, cinemaId } = req.body;
+    const { movieName, all, cinemaIds, cinemaId, releaseDate, leadDays } = req.body;
     if (!movieName) {
       return res.status(400).json({ error: 'movieName is required' });
     }
@@ -96,10 +101,34 @@ app.post('/api/track', async (req, res) => {
       }
     }
 
-    const added = entries.map((e) => movieTracker.addMovie(movieName, e.id, e.name));
+    // Resolve the release date: manual override wins, else look it up in the
+    // cached the-numbers.com schedule.
+    let resolvedDate = null;
+    let source = null;
+    if (releaseDate && /^\d{4}-\d{2}-\d{2}$/.test(releaseDate)) {
+      resolvedDate = releaseDate;
+      source = 'manual';
+    } else {
+      const hit = await releaseSchedule.findReleaseDate(movieName).catch(() => null);
+      if (hit) {
+        resolvedDate = hit.date;
+        source = hit.source;
+      }
+    }
+
+    const options = {
+      releaseDate: resolvedDate,
+      releaseDateSource: source,
+      leadDays: Number.isFinite(leadDays) ? leadDays : undefined
+    };
+
+    const added = entries.map((e) => movieTracker.addMovie(movieName, e.id, e.name, options));
 
     // Kick off an availability check in the background so the request returns fast.
-    console.log(`🔍 Tracking "${movieName}" at ${entries.map((e) => e.name).join(', ')}`);
+    console.log(
+      `🔍 Tracking "${movieName}" at ${entries.map((e) => e.name).join(', ')}` +
+        (resolvedDate ? ` (releases ${resolvedDate} via ${source})` : ' (no release date)')
+    );
     movieTracker
       .checkTrackedMovies()
       .then(() => console.log('✓ Background check completed'))
@@ -109,6 +138,37 @@ app.post('/api/track', async (req, res) => {
   } catch (error) {
     console.error('Error tracking movie:', error);
     res.status(500).json({ error: 'Failed to track movie' });
+  }
+});
+
+// Look up a film's release date in the cached schedule (for the UI to prefill).
+app.get('/api/release-schedule/lookup', async (req, res) => {
+  try {
+    const { title } = req.query;
+    if (!title) return res.status(400).json({ error: 'title is required' });
+    const hit = await releaseSchedule.findReleaseDate(title);
+    res.json(hit || { found: false });
+  } catch (error) {
+    console.error('Error looking up release date:', error);
+    res.status(500).json({ error: 'Failed to look up release date' });
+  }
+});
+
+// The cached release schedule (metadata + optional filtered list) for reference.
+app.get('/api/release-schedule', async (req, res) => {
+  try {
+    const data = await releaseSchedule.getSchedule();
+    const { q, limit } = req.query;
+    let releases = data.releases;
+    if (q) {
+      const term = String(q).toLowerCase();
+      releases = releases.filter((r) => r.title.toLowerCase().includes(term));
+    }
+    releases = releases.slice(0, limit ? Number(limit) : 100);
+    res.json({ updatedAt: data.updatedAt, years: data.years, count: data.count, releases });
+  } catch (error) {
+    console.error('Error getting release schedule:', error);
+    res.status(500).json({ error: 'Failed to get release schedule' });
   }
 });
 
@@ -146,13 +206,24 @@ app.delete('/api/notifications', (req, res) => {
   }
 });
 
-// Schedule periodic checks every 30 minutes
-cron.schedule('*/30 * * * *', async () => {
-  console.log('Running scheduled movie check...');
+// Scheduler tick every 10 minutes — checks only films that are due per their
+// release-aware cadence (3h at 10–8 days out, 2h at 7–6, 1h for the rest;
+// films outside their lead window aren't checked at all).
+cron.schedule('*/10 * * * *', async () => {
   try {
-    await movieTracker.checkTrackedMovies();
+    await movieTracker.checkDueMovies();
   } catch (error) {
     console.error('Error in scheduled check:', error);
+  }
+});
+
+// Refresh the the-numbers release schedule once a day (04:15).
+cron.schedule('15 4 * * *', async () => {
+  console.log('📅 Refreshing release schedule...');
+  try {
+    await releaseSchedule.refresh();
+  } catch (error) {
+    console.error('Error refreshing release schedule:', error.message);
   }
 });
 
@@ -171,10 +242,16 @@ app.post('/api/check', async (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`🎬 Odeon Dublin Movie Tracker running on http://localhost:${PORT}`);
-  console.log('⏰ Scheduled checks will run every 30 minutes');
+  console.log('⏰ Release-aware checks: 3h @ 10–8 days, 2h @ 7–6 days, 1h for the rest');
   if (process.env.FIRECRAWL_API_KEY) {
     console.log('🔥 Firecrawl: enabled');
   } else {
     console.log('📦 Firecrawl: not configured — using mock data (set FIRECRAWL_API_KEY in .env)');
   }
+
+  // Warm the release-schedule cache on startup (non-blocking).
+  releaseSchedule
+    .getSchedule()
+    .then((d) => console.log(`📅 Release schedule ready: ${d.count} entries (${d.years.join(', ')})`))
+    .catch((e) => console.error('⚠ Release schedule warm-up failed:', e.message));
 });

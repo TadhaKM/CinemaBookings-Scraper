@@ -5,8 +5,9 @@ A web application that scrapes Odeon Cinema Dublin's website and notifies you wh
 ## Features
 
 - **Track coming-soon films**: Track a film even before it's bookable — the app watches ODEON's **ALL Films** listing and alerts you the moment it moves from *Coming soon* to *Pre-book* / *Now showing*
+- **Release-aware scheduling**: Release dates come from [the-numbers.com](https://www.the-numbers.com/movies/release-schedule/2026) (cached locally). Checking starts a configurable number of days before release (default 10) and ramps up: every **3h** from 10–8 days out, **2h** at 7–6 days, and **hourly** for the final stretch
+- **Manual release dates**: If a film isn't in the schedule, enter its release date yourself and choose how many days before to start looking
 - **One, several, or all cinemas**: Track a film at a specific Dublin ODEON, a few of them, or "any" cinema
-- **Automatic Checking**: Re-checks every 30 minutes automatically
 - **Real-time Notifications**: Get notified when a tracked film becomes bookable (with showtimes where available)
 - **Manual Search**: Look up a film's status and showtimes immediately
 - **Clean Web Interface**: Modern Vue.js interface with poster art and status badges
@@ -109,14 +110,24 @@ Searches for a specific movie at a specific cinema.
 Returns all tracked movies.
 
 ### POST /api/track
-Adds a new movie to track.
+Adds a film to track — at one or more cinemas, or "any" ODEON Dublin cinema.
+Release date is auto-resolved from the-numbers.com; `releaseDate` overrides it and
+`leadDays` sets how many days before release to start checking (default 10).
 ```json
 {
-  "movieName": "Dune: Part Two",
-  "cinemaId": "point-square",
-  "cinemaName": "Odeon Point Square"
+  "movieName": "Dune: Part Three",
+  "all": true,
+  "cinemaIds": ["point-square", "blanchardstown"],
+  "releaseDate": "2026-12-18",
+  "leadDays": 10
 }
 ```
+
+### GET /api/release-schedule?q=<text>&limit=<n>
+Returns the cached the-numbers.com release schedule (optionally filtered by title).
+
+### GET /api/release-schedule/lookup?title=<name>
+Fuzzy-looks-up a single film's release date, e.g. `{ "title": "Dune: Part Three", "date": "2026-12-18", "source": "the-numbers" }`.
 
 ### DELETE /api/track/:id
 Removes a tracked movie.
@@ -142,21 +153,23 @@ CinemaBookings-Scraper/
 │   ├── odeon-scraper.js         # Orchestration: Firecrawl → mock fallback + fuzzy search
 │   └── mock-data.js             # Offline/dev sample data
 ├── services/
-│   └── movie-tracker.js         # Movie tracking and notification logic
+│   ├── movie-tracker.js         # Tracking, notifications, release-aware scheduling
+│   └── release-schedule.js      # the-numbers.com schedule scrape + cache + lookup
 ├── public/
 │   ├── index.html               # Main web interface (Vue.js)
 │   ├── styles.css               # Styling
 │   └── app.js                   # Vue.js application
 └── data/
     ├── tracked-movies.json      # Stored tracked movies
-    └── notifications.json       # Stored notifications
+    ├── notifications.json       # Stored notifications
+    └── release-schedule.json    # Cached the-numbers.com release schedule (refreshed daily)
 ```
 
 ## How It Works
 
 1. **Scraping**: Availability is driven by ODEON's **ALL Films** page (`/films/`), which lists every title with its status (*Now showing* / *Pre-book now* / *Coming soon*) — including films not yet in any cinema's daily listings. Firecrawl renders the page and the status/title/poster are parsed from it. One cached scrape covers every tracked film; individual cinema pages are only scraped to fetch showtimes for films that are actually bookable. Falls back to mock data if Firecrawl isn't configured
 2. **Tracking**: Movies are stored in a JSON file with their tracking status
-3. **Checking**: A cron job runs every 30 minutes to check all tracked movies
+3. **Scheduling**: A cron tick runs every 10 minutes and checks only the films that are *due*. Each film's cadence is release-aware — nothing is checked until its lead window opens (default 10 days before release), then it ramps from every 3h → 2h → hourly as release approaches. Release dates come from a locally-cached copy of the-numbers.com schedule (or a manual date you provide)
 4. **Notifications**: When a movie status changes from "not found" to "found", a notification is created
 5. **Persistence**: All data is stored in JSON files in the `data/` directory
 6. **Reactive UI**: Vue.js provides a modern, reactive user interface with real-time updates

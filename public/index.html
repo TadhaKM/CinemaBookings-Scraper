@@ -50,9 +50,18 @@
                             type="text"
                             id="movieName"
                             v-model="form.movieName"
-                            placeholder="e.g. Masters of the Universe"
+                            @input="onNameInput"
+                            placeholder="e.g. Avatar: Fire and Ash"
                             autocomplete="off"
                             required>
+                        <div class="detect-note" v-if="detect.loading">Looking up release date…</div>
+                        <div class="detect-note ok" v-else-if="detect.found">
+                            📅 Releases <strong>{{ fmtDate(detect.date) }}</strong> · found in schedule
+                            <span class="muted">({{ detect.title }})</span>
+                        </div>
+                        <div class="detect-note warn" v-else-if="detect.checked">
+                            Not in the release schedule — set a date below so we know when to start looking.
+                        </div>
                     </div>
 
                     <div class="field">
@@ -70,6 +79,24 @@
                                 @click="toggleCinema(cinema.id)">
                                 <span class="tick">✓</span> {{ cinema.name.replace(/^ODEON\s*/i, '') }}
                             </button>
+                        </div>
+                    </div>
+
+                    <div class="field timing-field">
+                        <div class="timing-col">
+                            <label for="releaseDate">
+                                Release date
+                                <span class="muted">{{ detect.found ? '(override)' : '(if not in schedule)' }}</span>
+                            </label>
+                            <input type="date" id="releaseDate" v-model="form.releaseDate"
+                                   :placeholder="detect.date || ''">
+                        </div>
+                        <div class="timing-col narrow">
+                            <label for="leadDays">Start checking</label>
+                            <div class="lead-input">
+                                <input type="number" id="leadDays" v-model.number="form.leadDays" min="0" max="120">
+                                <span>days before</span>
+                            </div>
                         </div>
                     </div>
 
@@ -175,8 +202,11 @@
                                     </span>
                                 </div>
                             </div>
+                            <div v-if="releaseLabel(movie)" class="ticket-release">
+                                🗓 {{ releaseLabel(movie) }}
+                                <span v-if="movie.releaseDateSource === 'manual'" class="src-tag">manual</span>
+                            </div>
                             <div class="ticket-meta">
-                                <template v-if="movie.releaseDate">Release {{ movie.releaseDate }} · </template>
                                 Added {{ formatDateTime(movie.addedAt) }}
                                 <template v-if="movie.lastChecked"><br>Last checked {{ formatDateTime(movie.lastChecked) }}</template>
                             </div>
@@ -185,6 +215,7 @@
                             <span class="status" :class="statusMeta(movie.filmStatus).cls">
                                 {{ statusMeta(movie.filmStatus).label }}
                             </span>
+                            <span class="cadence" :class="{ 'is-found': movie.status === 'found' }">{{ cadenceLabel(movie) }}</span>
                             <button class="btn btn-danger btn-sm" @click="removeMovie(movie.id)">Remove</button>
                         </div>
                     </div>
@@ -215,8 +246,8 @@
             </section>
 
             <footer>
-                <p>Listings refresh automatically every 30 minutes.</p>
-                <p class="stamp">Node · Express · Vue · Firecrawl</p>
+                <p>Checks ramp up near release — every 3h from 10 days out, 2h from 7, hourly in the final stretch.</p>
+                <p class="stamp">Node · Express · Vue · Firecrawl · the-numbers.com</p>
             </footer>
         </div>
 

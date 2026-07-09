@@ -354,6 +354,83 @@ select option { background: var(--ink); color: var(--text); }
 
 .pill-any.on .tick { color: #211804; opacity: 1; }
 
+/* --- Release-date detection + timing inputs ------------------- */
+
+.detect-note {
+  margin-top: 9px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+.detect-note.ok { color: var(--green); }
+.detect-note.warn { color: var(--gold-bright); }
+.detect-note .muted { color: var(--faint); }
+
+.timing-field {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.timing-col { flex: 1; min-width: 180px; }
+.timing-col.narrow { flex: 0 1 220px; }
+
+.timing-col label .muted {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--faint);
+  font-size: 0.9em;
+}
+
+.lead-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lead-input input { width: 90px; }
+
+.lead-input span {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+input[type='date'] {
+  color-scheme: dark;
+  font-family: var(--font-mono);
+}
+
+/* --- Watchlist release + cadence ------------------------------ */
+
+.ticket-release {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--gold);
+}
+
+.src-tag {
+  margin-left: 6px;
+  font-size: 0.9em;
+  color: var(--faint);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.cadence {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--muted);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.cadence.is-found { color: var(--green); }
+
 /* --- Status badges (film availability) ------------------------ */
 
 .status {
