@@ -3,4 +3,6 @@ node_modules/
 *.log
 .DS_Store
 data/*.json
+data/*.tmp
+data/*.corrupt-*
 !data/.gitkeep

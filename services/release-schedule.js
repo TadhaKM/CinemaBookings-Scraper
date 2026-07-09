@@ -13,6 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const Fuse = require('fuse.js');
+const store = require('./json-store');
 
 const DATA_DIR = path.join(__dirname, '../data');
 const CACHE_FILE = path.join(DATA_DIR, 'release-schedule.json');
@@ -63,20 +64,11 @@ async function fetchYear(year) {
 }
 
 function loadCache() {
-  try {
-    if (fs.existsSync(CACHE_FILE)) return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
-  } catch (e) {
-    console.error('Error reading release-schedule cache:', e.message);
-  }
-  return null;
+  return store.readJson(CACHE_FILE, null);
 }
 
 function saveCache(data) {
-  try {
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2));
-  } catch (e) {
-    console.error('Error writing release-schedule cache:', e.message);
-  }
+  store.writeJson(CACHE_FILE, data);
 }
 
 /**

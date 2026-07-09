@@ -222,6 +222,71 @@
                 </div>
             </section>
 
+            <!-- Check schedule settings -->
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Check schedule</h2>
+                    <button class="btn btn-ghost btn-sm" @click="settingsOpen = !settingsOpen">
+                        {{ settingsOpen ? 'Hide' : 'Edit' }}
+                    </button>
+                </div>
+
+                <!-- Read-only summary -->
+                <div class="sched-summary">
+                    <div v-for="(row, i) in scheduleSummary()" :key="i" class="sched-row" :class="{ dim: row.dim }">
+                        <span class="sched-range">{{ row.range }}</span>
+                        <span class="sched-every">{{ row.every }}</span>
+                    </div>
+                </div>
+
+                <!-- Editor -->
+                <div v-if="settingsOpen" class="sched-editor">
+                    <div class="field timing-field">
+                        <div class="timing-col narrow">
+                            <label for="setLead">Start checking</label>
+                            <div class="lead-input">
+                                <input type="number" id="setLead" v-model.number="settings.leadDays" min="0" max="365">
+                                <span>days before release</span>
+                            </div>
+                        </div>
+                        <div class="timing-col narrow">
+                            <label for="setUnknown">No release date</label>
+                            <div class="lead-input">
+                                <input type="number" id="setUnknown" v-model.number="settings.unknownIntervalHours"
+                                       min="0.25" max="168" step="0.25">
+                                <span>hours between checks</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <label class="tiers-label">Intervals</label>
+                    <div class="tier-rows">
+                        <div v-for="(tier, i) in settings.tiers" :key="i" class="tier-row">
+                            <span class="tier-lead">Within</span>
+                            <input type="number" v-model.number="tier.withinDays" min="0" max="365" class="tier-num">
+                            <span class="tier-lead">days of release → check every</span>
+                            <input type="number" v-model.number="tier.everyHours" min="0.25" max="168" step="0.25" class="tier-num">
+                            <span class="tier-lead">hours</span>
+                            <button type="button" class="tier-del" @click="removeTier(i)" title="Remove">✕</button>
+                        </div>
+                    </div>
+
+                    <div class="actions" style="margin-top:16px">
+                        <button type="button" class="btn btn-ghost btn-sm" @click="addTier">+ Add interval</button>
+                        <button type="button" class="btn btn-primary btn-sm" @click="saveSettings" :disabled="settingsSaving">
+                            {{ settingsSaving ? 'Saving…' : 'Save schedule' }}
+                        </button>
+                        <button type="button" class="btn btn-ghost btn-sm" @click="resetSettings" :disabled="settingsSaving">
+                            Reset to defaults
+                        </button>
+                    </div>
+                    <p class="sched-note">
+                        The scheduler ticks every {{ settings.tickMinutes || 10 }} minutes, so intervals shorter than
+                        that are rounded up. Films stop being checked once they're bookable.
+                    </p>
+                </div>
+            </section>
+
             <!-- Alerts -->
             <section class="panel">
                 <div class="panel-head">

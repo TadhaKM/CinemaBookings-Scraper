@@ -6,10 +6,11 @@
  */
 
 const mockCinemas = [
-  { id: 'point-square', name: 'ODEON Point Square Dublin', address: 'Point Village, Dublin 1' },
-  { id: 'blanchardstown', name: 'ODEON Blanchardstown', address: 'Blanchardstown Centre, Dublin 15' },
-  { id: 'coolock', name: 'ODEON Coolock', address: 'Northside Shopping Centre, Dublin 5' },
-  { id: 'stillorgan', name: 'ODEON Stillorgan', address: 'Stillorgan, Co. Dublin' }
+  { id: 'point-square', name: 'Point Square', address: 'Point Village, Dublin 1' },
+  { id: 'blanchardstown', name: 'Blanchardstown', address: 'Blanchardstown Centre, Dublin 15' },
+  { id: 'charlestown', name: 'Charlestown', address: "Charlestown Leisure Building, St. Margaret's Road, Dublin 11" },
+  { id: 'coolock', name: 'Coolock', address: 'Northside Shopping Centre, Dublin 5' },
+  { id: 'stillorgan', name: 'Stillorgan', address: 'Stillorgan, Co. Dublin' }
 ];
 
 function times(list, format = 'Standard') {

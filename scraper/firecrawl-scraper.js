@@ -85,9 +85,21 @@ async function scrapeStructured(url, schema, prompt, opts = {}) {
 }
 
 /**
+ * The Dublin-area ODEON cinemas. ODEON Ireland has 11 sites in total (Cavan,
+ * Limerick, Naas, Newbridge, Portlaoise, Waterford are outside Dublin), and the
+ * site's addresses don't consistently contain the word "Dublin" — so we select
+ * the Dublin ones by slug rather than by fuzzy text matching.
+ */
+const DUBLIN_CINEMA_SLUGS = ['blanchardstown', 'charlestown', 'coolock', 'point-square', 'stillorgan'];
+
+/**
  * Scrape the list of Odeon Dublin cinemas.
+ *
+ * The complete set of cinemas comes from the page's links (deterministic); the
+ * friendly name + address come from structured extraction where available.
  */
 async function scrapeCinemas() {
+  if (!API_KEY) throw new Error('FIRECRAWL_API_KEY is not set');
   console.log('🔥 Firecrawl: scraping Odeon Dublin cinemas...');
 
   const schema = {
@@ -98,8 +110,8 @@ async function scrapeCinemas() {
         items: {
           type: 'object',
           properties: {
-            name: { type: 'string', description: 'Cinema name, e.g. "ODEON Point Square Dublin"' },
-            url: { type: 'string', description: 'Absolute or relative link to the cinema page' },
+            name: { type: 'string', description: 'Cinema name, e.g. "Point Square"' },
+            url: { type: 'string', description: 'Link to the cinema page' },
             address: { type: 'string', description: 'Street address if shown' }
           },
           required: ['name']
@@ -110,27 +122,54 @@ async function scrapeCinemas() {
   };
 
   const prompt =
-    'Extract every Odeon cinema located in Dublin, Ireland from this page. ' +
-    'Only include cinemas whose location is Dublin. For each, capture its display name, ' +
-    'the link to its page, and its address if available.';
+    'Extract EVERY Odeon cinema listed on this page (all of Ireland, not just Dublin). ' +
+    'For each, capture its display name, the link to its cinema page, and its address.';
 
-  const data = await scrapeStructured(`${ODEON_WEBSITE}/cinemas/`, schema, prompt);
+  const response = await fetch(FIRECRAWL_API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+    body: JSON.stringify({
+      url: `${ODEON_WEBSITE}/cinemas/`,
+      onlyMainContent: true,
+      waitFor: 5000,
+      formats: ['links', { type: 'json', schema, prompt }]
+    })
+  });
 
-  const cinemas = (data.cinemas || [])
-    .filter((c) => c && c.name && /dublin/i.test(`${c.name} ${c.address || ''}`))
-    .map((c) => {
-      const slug = c.url ? c.url.split('/').filter(Boolean).pop() : slugify(c.name);
-      return {
-        id: slug || slugify(c.name),
-        name: c.name.trim(),
-        address: (c.address || '').trim()
-      };
-    });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Firecrawl HTTP ${response.status}: ${body.slice(0, 200)}`);
+  }
 
-  // Deduplicate by id
-  const unique = [...new Map(cinemas.map((c) => [c.id, c])).values()];
-  console.log(`🔥 Firecrawl: found ${unique.length} Dublin cinemas`);
-  return unique;
+  const payload = await response.json();
+  const links = payload.data?.links || [];
+  const extracted = payload.data?.json?.cinemas || [];
+
+  // Slugs actually present on the site, from links (complete + deterministic).
+  const slugRe = /\/cinemas\/([a-z0-9-]+)\/?$/i;
+  const presentSlugs = new Set(
+    links.map((l) => (l.match(slugRe) || [])[1]).filter(Boolean).map((s) => s.toLowerCase())
+  );
+
+  // Details keyed by slug, from the structured extraction.
+  const details = new Map();
+  for (const c of extracted) {
+    if (!c || !c.name) continue;
+    const slug = (c.url ? c.url.split('/').filter(Boolean).pop() : slugify(c.name)).toLowerCase();
+    details.set(slug, { name: c.name.trim(), address: (c.address || '').trim() });
+  }
+
+  const cinemas = DUBLIN_CINEMA_SLUGS.filter((slug) => presentSlugs.has(slug)).map((slug) => {
+    const d = details.get(slug) || {};
+    return {
+      id: slug,
+      name: d.name || humanizeSlug(slug),
+      address: d.address || ''
+    };
+  });
+
+  console.log(`🔥 Firecrawl: found ${cinemas.length} Dublin cinemas (${cinemas.map((c) => c.id).join(', ')})`);
+  return cinemas;
 }
 
 /**

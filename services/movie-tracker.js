@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const odeonScraper = require('../scraper/odeon-scraper');
+const settings = require('./settings');
+const store = require('./json-store');
 
 const DATA_DIR = path.join(__dirname, '../data');
 const TRACKED_FILE = path.join(DATA_DIR, 'tracked-movies.json');
@@ -15,52 +17,28 @@ if (!fs.existsSync(DATA_DIR)) {
  * Load tracked movies from file
  */
 function loadTrackedMovies() {
-  try {
-    if (fs.existsSync(TRACKED_FILE)) {
-      const data = fs.readFileSync(TRACKED_FILE, 'utf8');
-      return JSON.parse(data);
-    }
-  } catch (error) {
-    console.error('Error loading tracked movies:', error);
-  }
-  return [];
+  return store.readJson(TRACKED_FILE, []);
 }
 
 /**
- * Save tracked movies to file
+ * Save tracked movies to file (atomic)
  */
 function saveTrackedMovies(movies) {
-  try {
-    fs.writeFileSync(TRACKED_FILE, JSON.stringify(movies, null, 2));
-  } catch (error) {
-    console.error('Error saving tracked movies:', error);
-  }
+  store.writeJson(TRACKED_FILE, movies);
 }
 
 /**
  * Load notifications from file
  */
 function loadNotifications() {
-  try {
-    if (fs.existsSync(NOTIFICATIONS_FILE)) {
-      const data = fs.readFileSync(NOTIFICATIONS_FILE, 'utf8');
-      return JSON.parse(data);
-    }
-  } catch (error) {
-    console.error('Error loading notifications:', error);
-  }
-  return [];
+  return store.readJson(NOTIFICATIONS_FILE, []);
 }
 
 /**
- * Save notifications to file
+ * Save notifications to file (atomic)
  */
 function saveNotifications(notifications) {
-  try {
-    fs.writeFileSync(NOTIFICATIONS_FILE, JSON.stringify(notifications, null, 2));
-  } catch (error) {
-    console.error('Error saving notifications:', error);
-  }
+  store.writeJson(NOTIFICATIONS_FILE, notifications);
 }
 
 /**
@@ -73,8 +51,6 @@ function getTrackedMovies() {
 /**
  * Add a movie to track
  */
-const DEFAULT_LEAD_DAYS = 10;
-
 function addMovie(movieName, cinemaId, cinemaName, options = {}) {
   const movies = loadTrackedMovies();
 
@@ -95,7 +71,9 @@ function addMovie(movieName, cinemaId, cinemaName, options = {}) {
     filmStatus: 'unknown', // 'now-showing' | 'pre-book' | 'coming-soon' | 'not-listed'
     releaseDate: options.releaseDate || null, // 'YYYY-MM-DD' expected theatrical release
     releaseDateSource: options.releaseDateSource || null, // 'manual' | 'the-numbers' | null
-    leadDays: Number.isFinite(options.leadDays) ? options.leadDays : DEFAULT_LEAD_DAYS,
+    // null = inherit the global default from settings
+    leadDays: Number.isFinite(options.leadDays) ? options.leadDays : null,
+    tiers: Array.isArray(options.tiers) && options.tiers.length ? options.tiers : null,
     nextCheckAt: null,
     posterUrl: null,
     showings: [],
@@ -164,16 +142,13 @@ function clearNotifications() {
  * Check all tracked movies for availability
  */
 // --- Release-aware scheduling ----------------------------------------------
-// Check cadence ramps up as a film's release approaches:
+// The cadence tiers, lead window and unknown-date interval are user-configurable
+// in data/settings.json (see services/settings.js). Defaults:
 //   > leadDays away        → not checked yet (outside the window)
-//   8–10 days (and beyond) → every 3 hours
+//   8–10 days              → every 3 hours
 //   6–7 days               → every 2 hours
 //   ≤ 5 days (incl. past)  → every 1 hour
-// Films with no known release date default to every 3 hours.
-
-const MIN_3H = 180;
-const MIN_2H = 120;
-const MIN_1H = 60;
+//   unknown release date   → every 3 hours
 
 function daysUntil(dateStr) {
   if (!dateStr) return null;
@@ -184,15 +159,17 @@ function daysUntil(dateStr) {
   return Math.ceil((rel - today) / 86400000);
 }
 
+/** Per-film overrides layered on top of the global settings. */
+function overridesFor(movie) {
+  return {
+    leadDays: Number.isFinite(movie.leadDays) ? movie.leadDays : undefined,
+    tiers: Array.isArray(movie.tiers) && movie.tiers.length ? movie.tiers : undefined
+  };
+}
+
 /** Minutes between checks for a movie, or null if it's outside its lead window. */
 function intervalMinutes(movie) {
-  const d = daysUntil(movie.releaseDate);
-  const lead = Number.isFinite(movie.leadDays) ? movie.leadDays : DEFAULT_LEAD_DAYS;
-  if (d === null) return MIN_3H; // unknown release date
-  if (d > lead) return null; // window not open yet
-  if (d <= 5) return MIN_1H;
-  if (d <= 7) return MIN_2H;
-  return MIN_3H; // 8..10 (and >10 if lead is larger)
+  return settings.intervalMinutesFor(daysUntil(movie.releaseDate), overridesFor(movie));
 }
 
 function computeNextCheck(movie) {
@@ -202,12 +179,22 @@ function computeNextCheck(movie) {
     // Window not open yet: next check is when it opens (release − leadDays).
     if (movie.releaseDate) {
       const open = new Date(`${movie.releaseDate}T00:00:00`);
-      open.setDate(open.getDate() - (Number.isFinite(movie.leadDays) ? movie.leadDays : DEFAULT_LEAD_DAYS));
+      open.setDate(open.getDate() - settings.effectiveLeadDays(overridesFor(movie)));
       return open.toISOString();
     }
     return null;
   }
   return new Date(Date.now() + iv * 60000).toISOString();
+}
+
+/**
+ * Recompute every tracked film's nextCheckAt (e.g. after settings change).
+ */
+function recomputeSchedules() {
+  const movies = loadTrackedMovies();
+  for (const movie of movies) movie.nextCheckAt = computeNextCheck(movie);
+  saveTrackedMovies(movies);
+  return movies;
 }
 
 function isDue(movie, now) {
@@ -313,6 +300,7 @@ module.exports = {
   clearNotifications,
   checkTrackedMovies,
   checkDueMovies,
+  recomputeSchedules,
   // exported for testing
   intervalMinutes,
   daysUntil,

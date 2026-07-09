@@ -5,6 +5,7 @@ const cron = require('node-cron');
 const odeonScraper = require('./scraper/odeon-scraper');
 const movieTracker = require('./services/movie-tracker');
 const releaseSchedule = require('./services/release-schedule');
+const settings = require('./services/settings');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -138,6 +139,36 @@ app.post('/api/track', async (req, res) => {
   } catch (error) {
     console.error('Error tracking movie:', error);
     res.status(500).json({ error: 'Failed to track movie' });
+  }
+});
+
+// --- Check-schedule settings ------------------------------------------------
+
+// Current cadence settings (lead window, tiers, unknown-date interval).
+app.get('/api/settings', (req, res) => {
+  try {
+    res.json({ ...settings.get(), defaults: settings.DEFAULTS, tickMinutes: settings.MIN_INTERVAL_MINUTES });
+  } catch (error) {
+    console.error('Error getting settings:', error);
+    res.status(500).json({ error: 'Failed to get settings' });
+  }
+});
+
+// Update cadence settings. Values are validated/clamped server-side.
+// Body: { leadDays, unknownIntervalHours, tiers: [{ withinDays, everyHours }] }
+app.put('/api/settings', (req, res) => {
+  try {
+    const saved = settings.save(req.body || {});
+    // Existing tracked films should immediately respect the new cadence.
+    movieTracker.recomputeSchedules();
+    console.log(
+      `⚙ Settings updated: lead ${saved.leadDays}d, tiers ` +
+        saved.tiers.map((t) => `≤${t.withinDays}d→${t.everyHours}h`).join(', ')
+    );
+    res.json({ success: true, settings: saved });
+  } catch (error) {
+    console.error('Error saving settings:', error);
+    res.status(500).json({ error: 'Failed to save settings' });
   }
 });
 

@@ -6,6 +6,7 @@ A web application that scrapes Odeon Cinema Dublin's website and notifies you wh
 
 - **Track coming-soon films**: Track a film even before it's bookable — the app watches ODEON's **ALL Films** listing and alerts you the moment it moves from *Coming soon* to *Pre-book* / *Now showing*
 - **Release-aware scheduling**: Release dates come from [the-numbers.com](https://www.the-numbers.com/movies/release-schedule/2026) (cached locally). Checking starts a configurable number of days before release (default 10) and ramps up: every **3h** from 10–8 days out, **2h** at 7–6 days, and **hourly** for the final stretch
+- **Fully configurable intervals**: The whole cadence is editable in the UI (*Check schedule* panel) — set the lead window, add/remove tiers ("within N days of release → check every H hours", down to 15-minute intervals), and set the fallback interval for films with no known release date. Changes apply to existing tracked films immediately
 - **Manual release dates**: If a film isn't in the schedule, enter its release date yourself and choose how many days before to start looking
 - **One, several, or all cinemas**: Track a film at a specific Dublin ODEON, a few of them, or "any" cinema
 - **Real-time Notifications**: Get notified when a tracked film becomes bookable (with showtimes where available)
@@ -89,11 +90,16 @@ If you want to check right away instead of waiting:
 
 ## Dublin Odeon Cinemas Supported
 
-The app includes these Odeon cinemas in Dublin:
-- Odeon Point Square (Point Village, Dublin 1)
-- Odeon Blanchardstown (Blanchardstown Centre, Dublin 15)
-- Odeon Coolock (Northside Shopping Centre, Dublin 5)
-- Odeon Stillorgan (Stillorgan, Co. Dublin)
+The cinema list is scraped live from ODEON's site. The five Dublin-area cinemas are:
+- ODEON Point Square (Point Village, Dublin 1)
+- ODEON Blanchardstown (Blanchardstown Road South, Dublin 15)
+- ODEON Charlestown (St. Margaret's Road, Dublin 11)
+- ODEON Coolock (84 Malahide Rd, Northside, Coolock)
+- ODEON Stillorgan (Stillorgan Plaza, Lower Kilmacud Rd)
+
+ODEON Ireland's other sites (Cavan, Limerick, Naas, Newbridge, Portlaoise, Waterford) are excluded.
+Because several Dublin addresses don't literally contain the word "Dublin", the Dublin set is
+selected by cinema slug in `scraper/firecrawl-scraper.js` (`DUBLIN_CINEMA_SLUGS`).
 
 ## API Endpoints
 
@@ -122,6 +128,24 @@ Release date is auto-resolved from the-numbers.com; `releaseDate` overrides it a
   "leadDays": 10
 }
 ```
+
+### GET /api/settings
+Returns the current check-schedule settings (`leadDays`, `unknownIntervalHours`, `tiers`) plus `defaults` and the scheduler `tickMinutes`.
+
+### PUT /api/settings
+Updates the cadence. Values are validated and clamped server-side; tracked films' next-check times are recomputed immediately.
+```json
+{
+  "leadDays": 10,
+  "unknownIntervalHours": 3,
+  "tiers": [
+    { "withinDays": 5,  "everyHours": 1 },
+    { "withinDays": 7,  "everyHours": 2 },
+    { "withinDays": 10, "everyHours": 3 }
+  ]
+}
+```
+Tiers are evaluated ascending: the first tier where `daysUntilRelease <= withinDays` wins.
 
 ### GET /api/release-schedule?q=<text>&limit=<n>
 Returns the cached the-numbers.com release schedule (optionally filtered by title).
@@ -154,7 +178,9 @@ CinemaBookings-Scraper/
 │   └── mock-data.js             # Offline/dev sample data
 ├── services/
 │   ├── movie-tracker.js         # Tracking, notifications, release-aware scheduling
-│   └── release-schedule.js      # the-numbers.com schedule scrape + cache + lookup
+│   ├── release-schedule.js      # the-numbers.com schedule scrape + cache + lookup
+│   ├── settings.js              # Configurable cadence tiers + lead window
+│   └── json-store.js            # Atomic JSON reads/writes (no silent data loss)
 ├── public/
 │   ├── index.html               # Main web interface (Vue.js)
 │   ├── styles.css               # Styling
@@ -162,6 +188,7 @@ CinemaBookings-Scraper/
 └── data/
     ├── tracked-movies.json      # Stored tracked movies
     ├── notifications.json       # Stored notifications
+    ├── settings.json            # Your check-schedule settings
     └── release-schedule.json    # Cached the-numbers.com release schedule (refreshed daily)
 ```
 

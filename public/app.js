@@ -24,6 +24,9 @@ createApp({
         leadDays: 10 // start checking this many days before release
       },
       detect: { loading: false, checked: false, found: false, date: null, title: null },
+      settings: { leadDays: 10, unknownIntervalHours: 3, tiers: [], tickMinutes: 10 },
+      settingsOpen: false,
+      settingsSaving: false,
       search: {
         visible: false,
         loading: false,
@@ -34,6 +37,7 @@ createApp({
   },
 
   async mounted() {
+    await this.loadSettings();
     await this.loadCinemas();
     await this.loadTrackedMovies();
     await this.loadNotifications();
@@ -92,6 +96,110 @@ createApp({
         : 'cinemas=' + this.form.selected.map(encodeURIComponent).join(',');
     },
 
+    // ---- check-schedule settings ----
+    async loadSettings() {
+      try {
+        const s = await (await fetch('/api/settings')).json();
+        this.settings = s;
+        this.form.leadDays = s.leadDays;
+      } catch (e) {
+        /* keep defaults */
+      }
+    },
+    async saveSettings() {
+      this.settingsSaving = true;
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            leadDays: Number(this.settings.leadDays),
+            unknownIntervalHours: Number(this.settings.unknownIntervalHours),
+            tiers: this.settings.tiers.map((t) => ({
+              withinDays: Number(t.withinDays),
+              everyHours: Number(t.everyHours)
+            }))
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          this.settings = { ...this.settings, ...data.settings };
+          this.showToast('Check schedule saved', 'success');
+          await this.loadTrackedMovies(); // nextCheckAt recomputed server-side
+        } else {
+          this.showToast(data.error || 'Failed to save', 'error');
+        }
+      } catch (e) {
+        this.showToast('Failed to save settings', 'error');
+      } finally {
+        this.settingsSaving = false;
+      }
+    },
+    addTier() {
+      const maxDay = this.settings.tiers.reduce((m, t) => Math.max(m, Number(t.withinDays) || 0), 0);
+      this.settings.tiers.push({ withinDays: maxDay + 5, everyHours: 6 });
+    },
+    removeTier(i) {
+      this.settings.tiers.splice(i, 1);
+    },
+    async resetSettings() {
+      this.settings = { ...this.settings, ...JSON.parse(JSON.stringify(this.settings.defaults)) };
+      await this.saveSettings();
+    },
+
+    // Format an interval given in hours: 0.5 -> "30min", 3 -> "3h"
+    fmtHours(h) {
+      const n = Number(h);
+      if (!Number.isFinite(n)) return '—';
+      if (n < 1) return `${Math.round(n * 60)}min`;
+      return `${Number.isInteger(n) ? n : n.toFixed(1)}h`;
+    },
+
+    // Sorted tiers (ascending by withinDays) — the order rules are evaluated in.
+    sortedTiers() {
+      return [...this.settings.tiers]
+        .map((t) => ({ withinDays: Number(t.withinDays), everyHours: Number(t.everyHours) }))
+        .filter((t) => Number.isFinite(t.withinDays) && Number.isFinite(t.everyHours))
+        .sort((a, b) => a.withinDays - b.withinDays);
+    },
+
+    // Plain-English summary of the resulting schedule.
+    scheduleSummary() {
+      const tiers = this.sortedTiers();
+      if (!tiers.length) return [];
+      const lead = Number(this.settings.leadDays);
+      const rows = [];
+
+      rows.push({ range: `More than ${lead} days before release`, every: 'not checked yet', dim: true });
+
+      const maxWithin = tiers[tiers.length - 1].withinDays;
+      if (lead > maxWithin) {
+        rows.push({
+          range: `${lead}–${maxWithin + 1} days before`,
+          every: `every ${this.fmtHours(tiers[tiers.length - 1].everyHours)}`
+        });
+      }
+
+      for (let i = tiers.length - 1; i >= 0; i--) {
+        const upper = tiers[i].withinDays;
+        const lower = i === 0 ? null : tiers[i - 1].withinDays + 1;
+        const range =
+          lower === null
+            ? `${upper} days or fewer (incl. after release)`
+            : upper === lower
+              ? `${upper} days before`
+              : `${upper}–${lower} days before`;
+        rows.push({ range, every: `every ${this.fmtHours(tiers[i].everyHours)}` });
+      }
+
+      rows.push({
+        range: 'No known release date',
+        every: `every ${this.fmtHours(this.settings.unknownIntervalHours)}`,
+        dim: true
+      });
+      return rows;
+    },
+
     // ---- release-date detection ----
     onNameInput() {
       clearTimeout(this._detectTimer);
@@ -137,18 +245,20 @@ createApp({
       return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
     },
     // Human label for how often a tracked film is being checked.
+    // Mirrors the server's tier resolution in services/settings.js.
     cadenceLabel(movie) {
       if (movie.status === 'found') return 'Bookable';
-      const lead = Number.isFinite(movie.leadDays) ? movie.leadDays : 10;
+      const lead = Number.isFinite(movie.leadDays) ? movie.leadDays : Number(this.settings.leadDays);
       const d = this.daysUntil(movie.releaseDate);
-      if (d === null) return 'Checking every 3h';
+      if (d === null) return `Checking every ${this.fmtHours(this.settings.unknownIntervalHours)}`;
       if (d > lead) {
         const start = d - lead;
         return `Checks begin in ${start} day${start === 1 ? '' : 's'}`;
       }
-      if (d <= 5) return 'Checking every 1h';
-      if (d <= 7) return 'Checking every 2h';
-      return 'Checking every 3h';
+      const tiers = this.sortedTiers();
+      if (!tiers.length) return 'Checking';
+      const tier = tiers.find((t) => d <= t.withinDays) || tiers[tiers.length - 1];
+      return `Checking every ${this.fmtHours(tier.everyHours)}`;
     },
     releaseLabel(movie) {
       if (!movie.releaseDate) return null;

@@ -403,6 +403,103 @@ input[type='date'] {
   font-family: var(--font-mono);
 }
 
+/* --- Check-schedule panel ------------------------------------- */
+
+.sched-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.sched-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 14px;
+  padding: 11px 15px;
+  background: var(--surface-2);
+  flex-wrap: wrap;
+}
+
+.sched-row.dim { background: var(--ink-2); }
+.sched-row.dim .sched-every { color: var(--faint); }
+
+.sched-range { font-size: 0.88rem; color: var(--text); }
+
+.sched-every {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--gold);
+  white-space: nowrap;
+}
+
+.sched-editor {
+  margin-top: 22px;
+  padding-top: 22px;
+  border-top: 1px dashed var(--line-strong);
+}
+
+.tiers-label {
+  display: block;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin: 6px 0 10px;
+}
+
+.tier-rows { display: flex; flex-direction: column; gap: 10px; }
+
+.tier-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  background: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.tier-lead {
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tier-num {
+  width: 78px;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
+.tier-del {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--faint);
+  border-radius: 6px;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+
+.tier-del:hover { color: var(--red); border-color: rgba(224, 86, 59, 0.5); }
+
+.sched-note {
+  margin-top: 14px;
+  font-size: 0.8rem;
+  color: var(--faint);
+  line-height: 1.5;
+}
+
 /* --- Watchlist release + cadence ------------------------------ */
 
 .ticket-release {
