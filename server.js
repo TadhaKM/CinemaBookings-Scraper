@@ -19,7 +19,10 @@ app.use(express.json());
 // to anyone. /api/health stays open so platform health checks don't need creds.
 app.use(basicAuth({ user: process.env.APP_USER, pass: process.env.APP_PASS, exempt: ['/api/health'] }));
 
-app.use(express.static('public'));
+// no-cache = the browser may cache but must revalidate (via ETag) before using
+// it. Prevents a redeploy leaving users on a stale app.js — which looks exactly
+// like an old bug "coming back" after it was fixed.
+app.use(express.static('public', { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 
 // Liveness probe (unauthenticated). Includes the deployed commit so we can tell
 // which build is live (Railway injects RAILWAY_GIT_COMMIT_SHA).

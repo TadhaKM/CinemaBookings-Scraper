@@ -117,7 +117,6 @@
                     </div>
 
                     <div v-else-if="search.data && search.data.notListed" class="empty">
-                        <span class="reel">🎞️</span>
                         <p><strong>“{{ search.data.query }}” isn't on ODEON's listings.</strong></p>
                         <p style="margin-top:6px">Check the spelling, or it may not be scheduled at ODEON Ireland yet.</p>
                     </div>
@@ -127,7 +126,7 @@
                             <img v-if="search.data.film && search.data.film.posterUrl"
                                  :src="search.data.film.posterUrl" :alt="search.data.film.name"
                                  @error="search.data.film.posterUrl = null">
-                            <div v-else class="poster-fallback"><span class="reel">🎞️</span></div>
+                            <div v-else class="poster-fallback"></div>
                         </div>
                         <div class="film-info">
                             <span class="status" :class="statusMeta(search.data.status).cls">
