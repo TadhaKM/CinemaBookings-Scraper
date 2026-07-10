@@ -47,6 +47,7 @@ createApp({
       search: {
         visible: false,
         loading: false,
+        loadingShowings: false,
         data: null
       },
       toast: { visible: false, message: '', type: 'success' }
@@ -388,13 +389,29 @@ createApp({
       this.search.loading = true;
       this.search.data = null;
       try {
+        // Fast: status only. Showtimes load on demand via loadShowings().
         const url = `/api/search?movie=${encodeURIComponent(this.form.movieName)}&${this.requestParams()}`;
-        this.search.data = await this.fetchJson(url);
+        this.search.data = await this.fetchJson(url, {}, 30000);
       } catch (e) {
         this.search.visible = false;
         this.showToast(e.message || 'Search failed', 'error');
       } finally {
         this.search.loading = false;
+      }
+    },
+
+    // Fetch showtimes for the current search result (the slow, multi-cinema
+    // scrape). Runs with its own spinner so the rest of the form stays usable.
+    async loadShowings() {
+      if (this.search.loadingShowings || !this.search.data) return;
+      this.search.loadingShowings = true;
+      try {
+        const url = `/api/search?movie=${encodeURIComponent(this.search.data.query)}&${this.requestParams()}&showings=1`;
+        this.search.data = await this.fetchJson(url, {}, 120000);
+      } catch (e) {
+        this.showToast(e.message || 'Could not load showtimes', 'error');
+      } finally {
+        this.search.loadingShowings = false;
       }
     },
 

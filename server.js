@@ -21,9 +21,11 @@ app.use(basicAuth({ user: process.env.APP_USER, pass: process.env.APP_PASS, exem
 
 app.use(express.static('public'));
 
-// Liveness probe (unauthenticated).
+// Liveness probe (unauthenticated). Includes the deployed commit so we can tell
+// which build is live (Railway injects RAILWAY_GIT_COMMIT_SHA).
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, uptime: Math.round(process.uptime()) });
+  const sha = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT || 'dev';
+  res.json({ ok: true, uptime: Math.round(process.uptime()), version: sha.slice(0, 7) });
 });
 
 // API Routes
@@ -66,8 +68,12 @@ app.get('/api/search', async (req, res) => {
         ? [cinema]
         : [];
 
+    // Showtimes (the slow, multi-cinema scrape) are opt-in so "Check now" stays
+    // instant; the UI loads them on demand.
+    const withShowings = req.query.showings === '1' || req.query.showings === 'true';
+
     const targets = wantAll ? [] : await odeonScraper.resolveCinemas({ cinemaIds });
-    const result = await odeonScraper.checkFilmDetailed(movie, targets, { all: wantAll });
+    const result = await odeonScraper.checkFilmDetailed(movie, targets, { all: wantAll, withShowings });
     res.json(result);
   } catch (error) {
     console.error('Error searching movie:', error);

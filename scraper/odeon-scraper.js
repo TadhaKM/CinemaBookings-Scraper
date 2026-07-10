@@ -348,10 +348,16 @@ async function checkFilm(movieName) {
 }
 
 /**
- * Detailed, film-centric search used by the UI's "Search now":
- * film status + release date + which of the requested cinemas have showtimes.
+ * Film-centric search for the UI's "Check now".
+ *
+ * Two modes:
+ *  - Fast (default): status only, straight from the cached ALL Films index —
+ *    no network, effectively instant. This keeps the button responsive.
+ *  - withShowings: additionally scrapes the film page (release date + synopsis)
+ *    and every requested cinema for showtimes. This is the slow part (up to 5
+ *    cinema scrapes), so the UI only asks for it on demand via a button.
  */
-async function checkFilmDetailed(movieName, targets = [], { all = false } = {}) {
+async function checkFilmDetailed(movieName, targets = [], { all = false, withShowings = false } = {}) {
   const base = await checkFilm(movieName);
   const out = {
     query: movieName,
@@ -360,12 +366,14 @@ async function checkFilmDetailed(movieName, targets = [], { all = false } = {}) 
     bookable: base.bookable,
     releaseDate: base.releaseDate,
     film: base.film,
-    showings: []
+    showings: [],
+    showingsLoaded: false
   };
 
-  // Search is user-initiated, so enrich with release date + synopsis from the
-  // film page (the ALL Films page doesn't carry these). The recurring tracker
-  // check never does this — it stays on the ALL Films page only.
+  // Fast path: return the index-only status immediately.
+  if (!withShowings) return out;
+
+  // Heavy path (opt-in): enrich release date + synopsis from the film page...
   if (base.film && base.film.url && firecrawl.isConfigured()) {
     try {
       const details = await firecrawl.scrapeFilm(base.film.url);
@@ -381,6 +389,7 @@ async function checkFilmDetailed(movieName, targets = [], { all = false } = {}) 
     }
   }
 
+  // ...and scrape the requested cinemas for showtimes.
   if (base.bookable) {
     const cinemas = all || targets.length === 0 ? await getCinemas() : targets;
     const showings = await Promise.all(
@@ -394,6 +403,7 @@ async function checkFilmDetailed(movieName, targets = [], { all = false } = {}) 
     out.showings = showings.filter(Boolean);
   }
 
+  out.showingsLoaded = true;
   return out;
 }
 

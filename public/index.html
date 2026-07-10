@@ -137,12 +137,13 @@
                             <div class="film-sub">
                                 <span v-if="search.data.film && search.data.film.certificate">{{ search.data.film.certificate }}</span>
                                 <span v-if="search.data.releaseDate"> · Released {{ search.data.releaseDate }}</span>
+                                <span v-else-if="detect.date"> · Releases {{ fmtDate(detect.date) }}</span>
                             </div>
                             <p v-if="search.data.film && search.data.film.synopsis" class="film-synopsis">
                                 {{ search.data.film.synopsis }}
                             </p>
 
-                            <!-- Showings -->
+                            <!-- Showings (loaded on demand) -->
                             <div v-if="search.data.showings.length" class="showings">
                                 <div v-for="s in search.data.showings" :key="s.cinemaId" class="showing-row">
                                     <div class="showing-cinema">{{ s.cinemaName }}</div>
@@ -155,17 +156,22 @@
                                     </div>
                                 </div>
                             </div>
-                            <p v-else-if="search.data.bookable" class="no-times">
-                                Bookable now, but no daily showtimes at your selected cinema{{ form.anyCinema ? 's' : '' }} yet — pre-book on ODEON.
+                            <p v-else-if="search.data.showingsLoaded && search.data.bookable" class="no-times">
+                                Bookable, but no daily showtimes at your selected cinema{{ form.anyCinema ? 's' : '' }} yet — pre-book on ODEON.
                             </p>
-                            <p v-else class="no-times">
+                            <p v-else-if="!search.data.bookable" class="no-times">
                                 Not bookable yet. Track it and we'll alert you the moment it opens.
                             </p>
 
-                            <button class="btn btn-primary btn-sm" style="margin-top:14px"
-                                    @click="trackFromSearch" :disabled="tracking">
-                                {{ tracking ? 'Adding…' : '+ Track this film' }}
-                            </button>
+                            <div class="actions" style="margin-top:14px">
+                                <button class="btn btn-primary btn-sm" @click="trackFromSearch" :disabled="tracking">
+                                    {{ tracking ? 'Adding…' : '+ Track this film' }}
+                                </button>
+                                <button v-if="search.data.bookable && !search.data.showingsLoaded"
+                                        class="btn btn-ghost btn-sm" @click="loadShowings" :disabled="search.loadingShowings">
+                                    {{ search.loadingShowings ? 'Loading showtimes…' : 'Show showtimes' }}
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
