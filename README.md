@@ -355,7 +355,6 @@ The frontend uses Vue.js 3 for:
 
 - Email/SMS notifications
 - Support for other Irish cinema chains (IMC, Omniplex)
-- Advanced search with filters (date, time, format)
 - Browser push notifications
 - Mobile app
 - User accounts and cloud sync
